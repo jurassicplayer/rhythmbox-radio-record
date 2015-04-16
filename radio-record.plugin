@@ -1,0 +1,12 @@
+[Plugin]
+Loader=python3
+Module=radio-record
+IAge=2
+Depends=rb
+Name=Record radio stations
+Name[de]=Internetradio aufnehmen
+Name[fr]=Enregistrer des stations radio
+Description=Record an internet radio station via the toolbar
+Authors=Jurassicplayer <jurassicplayer.github.io>
+Copyright=Copyright © 2015 Jurassicplayer
+Website=http://jurassicplayer.github.io/
