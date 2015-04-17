@@ -144,7 +144,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
     def tool_menu(self):
         print("I AM THE MIGHTY TOOL MENU")
         ## Need to add a UI to set all of the options for Streamripper.
-
+        
 
 class StreamRipperProcess(threading.Thread):
     def __init__(self, uri, basedirectory):
