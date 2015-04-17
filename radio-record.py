@@ -25,20 +25,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
     
     def __init__(self):
         GObject.Object.__init__(self)
-    '''    
-    def refresh_toolbar(self):
-        app = Gio.Application.get_default()
-        app.remove_plugin_menu_item('iradio-toolbar', self.status)
-        if self.status == 'record-radio':
-            self.status = 'stop-radio'
-        elif self.status == 'stop-radio':
-            self.status = 'record-radio'
-        else:
-            print('No status was assigned, should assign record-radio')
-            self.status = 'record-radio'
-        self.create_toolbar();
-    '''    
-    
     
     def refresh_ui(self):
         try:
@@ -79,29 +65,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
         self.uri = ""
         self.status = ""
         self.runningDB = {}
-        '''
-        shell = self.object
-        page = shell.props.selected_page
-        if not hasattr(page, 'get_entry_view'):
-            print('No entry view')
-            return
-        selected = page.get_entry_view().get_selected_entries()
-        if selected != []:
-            ## selected is a list object
-            self.uri = selected[0].get_playback_uri()
-            print(self.uri)
-            
-            app = Gio.Application.get_default()
-            self.status = 'record-radio'
-            action = Gio.SimpleAction(name='record-radio')
-            action.connect('activate', self.create_stop)
-            app.add_action(action)
-            
-            item = Gio.MenuItem()
-            item.set_label(self.status.split('-')[0])
-            item.set_detailed_action('app.'+self.status)
-            app.add_plugin_menu_item('iradio-toolbar', self.status, item)
-        '''
 
         GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
         ##Gdk.threads_add_idle(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui))
@@ -122,6 +85,8 @@ class radioRecord (GObject.Object, Peas.Activatable):
         item.set_label(self.status.split('-')[0])
         item.set_detailed_action('app.'+self.status)
         app.add_plugin_menu_item('iradio-toolbar', self.status, item)
+        
+        
     ## Create the stop button after starting a recording.
     def create_stop(self, action, *args):
         
@@ -148,14 +113,17 @@ class radioRecord (GObject.Object, Peas.Activatable):
 
     def record_radio(self, action, *args):
         self.create_stop('record-radio')
+        recordprocess = StreamRipperProcess(self.uri, '~/Music/')
+        recordprocess.start()
+        ## Replace dictionary 'running' with actual streamripper object?
         self.runningDB.update({str(self.uri):'running'})
-        for arg in args:
-            print(str(action)+' '+str(arg))
+        
+        
     def stop_radio(self, action, *args):
         self.create_record('stop-radio')
         self.runningDB.update({str(self.uri):'stopped'})
-        for arg in args:
-            print(str(action)+' '+str(arg))
+        
+    
 
 
 
@@ -182,16 +150,72 @@ class StreamRipperProcess(threading.Thread):
     def extract_uri(self, old_uri):
         ## Need to add check for playlist files vs stream link
         try:
-            f = urllib.request.urlopen(self.uri)
-            if self.uri[-4:] == '.m3u':
-                playlist = f.read().decode('utf-8')
-                self.final_uri = playlist.split('\r\n', 1)[0]
-            elif self.uri[-4:] == '.pls':
-                playlist = f.read()
-                self.final_uri = playlist
-                print(playlist)
+            f = urllib.request.urlopen(old_uri)
+            url_info = str(f.info()).lower()
+            
+            ## MP3 Stream ##
+            if "content-type: audio/mpeg" in url_info:
+                final_uri = old_uri
+            
+            ## M3U/RAM Playlist ##
+            elif "content-type: audio/x-mpegurl" in url_info or "Content-Type: audio/x-pn-realaudio" in url_info:
+                print("This is a m3u playlist or ram playlist.")
+                ## Split all line breaks
+                url_data = f.read().decode('utf-8').splitlines()
+                ## Remove all lines containing #
+                uri_data = []
+                for line in url_data:
+                    if '#' not in line:
+                        uri_data.append(line)
+                ## Use first uri in list
+                final_uri = uri_data[0]
+            
+            ## PLS Playlist ##
+            elif "content-type: audio/x-scpls" in url_info:
+                print("This is a pls playlist.")
+                ## Split all line breaks
+                url_data = f.read().decode('utf-8').splitlines()
+                ## Remove all lines that don't have reference link
+                uri_data = []
+                for line in url_data:
+                    if 'file1=' in str(line).lower():
+                        uri_data.append(line.split('=')[1])
+                ## Use first uri in list
+                final_uri = uri_data[0]
+                
+            ## ASX Playlist ##
+            elif "content-type: video/x-ms-asf" in url_info:
+                print("This is a asx playlist.")
+                ## Split all line breaks
+                url_data = f.read().decode('utf-8').splitlines()
+                url_data.replace("'",'"')
+                ## Remove all lines that don't have reference link
+                uri_data = []
+                for line in url_data:
+                    if 'ref href=' in line.lower():
+                        uri_data.append(line.split('"')[1])
+                ## Use first uri in list
+                final_uri = uri_data[0]
+            
+            ## QTL Playlist ##
+            elif "content-type: audio/x-quicktimeplayer" in url_info:
+                print("This is a qtl playlist.")
+                url_data = f.read().decode('utf-8').splitlines()
+                url_data.replace("'",'"')
+                ## Remove all lines that don't have reference link
+                uri_data = []
+                for line in url_data:
+                    if 'src="' in line.lower():
+                        uri_data.append(line.split('"')[1])
+                ## Use first uri in list
+                final_uri = uri_data[0]
+                
+            ## Unknown ##
             else:
-                self.final_uri = self.uri
+                print("I don't even know what this could be...another audio format?")
+                final_uri = old_uri
+                
+            return final_uri
         except Exception as e:
             print(e)
             return
@@ -199,9 +223,10 @@ class StreamRipperProcess(threading.Thread):
     Open the process
     """
     def start(self):
+        final_uri = self.extract_uri(self.uri)
         options = []
         options.append("streamripper")
-        options.append(self.final_uri)
+        options.append(final_uri)
         options.append("-t")
         if self.create_subfolder == False:
             options.append("-s")
@@ -214,7 +239,7 @@ class StreamRipperProcess(threading.Thread):
 
         print("Starting streamripper: ")       
         print(options)
-        
+'''        
         try:
             self.process = subprocess.Popen(options, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
         except OSError as e:
@@ -247,3 +272,4 @@ class StreamRipperProcess(threading.Thread):
                 shutil.rmtree(self.directory + "/incomplete")
             except:
                 pass
+'''
