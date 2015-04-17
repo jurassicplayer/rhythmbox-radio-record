@@ -158,7 +158,7 @@ class StreamRipperProcess(threading.Thread):
                 final_uri = old_uri
             
             ## M3U/RAM Playlist ##
-            elif "content-type: audio/x-mpegurl" in url_info or "Content-Type: audio/x-pn-realaudio" in url_info:
+            elif "content-type: audio/x-mpegurl" in url_info or "content-type: audio/x-pn-realaudio" in url_info:
                 print("This is a m3u playlist or ram playlist.")
                 ## Split all line breaks
                 url_data = f.read().decode('utf-8').splitlines()
