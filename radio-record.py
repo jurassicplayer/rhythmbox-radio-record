@@ -17,8 +17,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA.
 
-from gi.repository import GObject, Gtk, Pango, Peas, RB, Gio, Gdk
-import subprocess, os, time, threading, _thread, configparser, shutil, re, codecs, urllib
+from gi.repository import GObject, Gtk, GConf, Peas, RB, Gio
+import subprocess, os, time, threading, configparser, shutil, re, codecs, urllib
 
 class radioRecord (GObject.Object, Peas.Activatable):
     object = GObject.property (type = GObject.Object)
@@ -41,15 +41,15 @@ class radioRecord (GObject.Object, Peas.Activatable):
                 if current_uri != self.uri:
                     self.uri = current_uri
                     try:
-                        ## If the entry has a recording going
-                        if self.runningDB[str(current_uri)] == 'running':
-                            print('Recording')
-                            self.create_stop('swap-entry')
-                        ## Else if the entry doesn't
-                        else:
+                        ## If the entry is stopped
+                        if self.runningDB[str(current_uri)] == 'stopped':
                             print('Not recording')
                             self.create_record('swap-entry')
                             self.runningDB.update({str(current_uri):'stopped'})
+                        ## If the entry is recording
+                        else:
+                            print('Recording')
+                            self.create_stop('swap-entry')
                     except KeyError:
                         print('Not recording')
                         self.create_record('swap-entry')
@@ -59,16 +59,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
             print(e)
             pass
         return True
-    
-    
-    def do_activate(self):
-        self.uri = ""
-        self.status = ""
-        self.runningDB = {}
-
-        GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
-        ##Gdk.threads_add_idle(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui))
-        
         
     ## Create the recording button after stopping current recording.
     def create_record(self, action, *args):
@@ -76,13 +66,12 @@ class radioRecord (GObject.Object, Peas.Activatable):
         app = Gio.Application.get_default()
         app.remove_plugin_menu_item('iradio-toolbar', self.status)
         self.status = 'record-radio'
-        app = Gio.Application.get_default()
         action = Gio.SimpleAction(name=self.status)
         action.connect('activate', self.record_radio)
         app.add_action(action)
         
         item = Gio.MenuItem()
-        item.set_label(self.status.split('-')[0])
+        item.set_label(self.status.split('-')[0].capitalize())
         item.set_detailed_action('app.'+self.status)
         app.add_plugin_menu_item('iradio-toolbar', self.status, item)
         
@@ -93,38 +82,68 @@ class radioRecord (GObject.Object, Peas.Activatable):
         app = Gio.Application.get_default()
         app.remove_plugin_menu_item('iradio-toolbar', self.status)
         self.status = 'stop-radio'
-        app = Gio.Application.get_default()
         action = Gio.SimpleAction(name=self.status)
         action.connect('activate', self.stop_radio)
         app.add_action(action)
         
         item = Gio.MenuItem()
-        item.set_label(self.status.split('-')[0])
+        item.set_label(self.status.split('-')[0].capitalize())
         item.set_detailed_action('app.'+self.status)
         app.add_plugin_menu_item('iradio-toolbar', self.status, item)
 
+    def do_activate(self):
+        self.uri = ""
+        self.status = ""
+        self.runningDB = {}
+        
+        ## Create Tool Menu
+        app = Gio.Application.get_default()
+        action = Gio.SimpleAction(name='Tool Menu')
+        action.connect('activate', self.tool_menu)
+        app.add_action(action)
+        
+        item = Gio.MenuItem()
+        item.set_label("Radio-Record")
+        item.set_detailed_action('app.radio-record')
+        app.add_plugin_menu_item('tools', 'radio-record', item)
+        
+        self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
+        
     def do_deactivate(self):
         app = Gio.Application.get_default()
+        
+        ## Stop all running recordings
+        for station in self.runningDB:
+            if self.runningDB[station] != 'stopped' and self.runningDB[station]:
+                recordprocess = self.runningDB[station]
+                recordprocess.stop()
+        
+        ## Remove toolbar button
         app.remove_plugin_menu_item('iradio-toolbar', self.status)
         
         del self.status
         del self.runningDB
         del self.uri
+        GObject.source_remove(self.idle_id)
 
     def record_radio(self, action, *args):
         self.create_stop('record-radio')
-        recordprocess = StreamRipperProcess(self.uri, '~/Music/')
+        recordprocess = StreamRipperProcess(self.uri, 'Music/')
         recordprocess.start()
-        ## Replace dictionary 'running' with actual streamripper object?
-        self.runningDB.update({str(self.uri):'running'})
+        ## Add streamripper instance to dictionary
+        self.runningDB.update({str(self.uri) : recordprocess})
         
         
     def stop_radio(self, action, *args):
         self.create_record('stop-radio')
+        ## Grab Streamripper instance from runningDB
+        recordprocess = self.runningDB[str(self.uri)]
+        recordprocess.stop()
         self.runningDB.update({str(self.uri):'stopped'})
         
-    
-
+    def tool_menu(self):
+        print("I AM THE MIGHTY TOOL MENU")
+        ## Need to add a UI to set all of the options for Streamripper.
 
 
 class StreamRipperProcess(threading.Thread):
@@ -140,7 +159,7 @@ class StreamRipperProcess(threading.Thread):
         self.current_song_size = 0 # file size of currently ripping song (int, in kb)
         self.basedirectory = basedirectory
         self.directory = self.basedirectory
-        self.create_subfolder = False
+        self.create_subfolder = True
         self.killed = False
         self.show_notifications = False
         self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
@@ -148,7 +167,6 @@ class StreamRipperProcess(threading.Thread):
         self.single_file = False
 
     def extract_uri(self, old_uri):
-        ## Need to add check for playlist files vs stream link
         try:
             f = urllib.request.urlopen(old_uri)
             url_info = str(f.info()).lower()
@@ -219,6 +237,7 @@ class StreamRipperProcess(threading.Thread):
         except Exception as e:
             print(e)
             return
+            
     """
     Open the process
     """
@@ -239,15 +258,13 @@ class StreamRipperProcess(threading.Thread):
 
         print("Starting streamripper: ")       
         print(options)
-'''        
+
         try:
+            print("Starting stream process")
             self.process = subprocess.Popen(options, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
         except OSError as e:
             print(_('Streamripper binary not found! ERROR: %s') % e)
-            dialog = Gtk.MessageDialog(None,
-             Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                     Gtk.MessageType.ERROR,
-             Gtk.ButtonsType.CLOSE,
+            dialog = Gtk.MessageDialog(None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE,
                      _('Streamripper not found!\nPlease install the streamripper package from your distribution or install it manually from: http://streamripper.sourceforge.net'))
             dialog.set_title(_('Missing binary file'))
             dialog.set_property("skip-taskbar-hint", False)
@@ -256,12 +273,13 @@ class StreamRipperProcess(threading.Thread):
 
             self.killed = True
             return False
-        _thread.start_new_thread(self.reload_info, ())
 
     """
     Terminate process & clean incomplete files if needed
     """
     def stop(self, clean=False):
+        print("Stopping stream: "+str(self.uri))
+
         try:
             self.process.terminate()
         except:
@@ -272,4 +290,4 @@ class StreamRipperProcess(threading.Thread):
                 shutil.rmtree(self.directory + "/incomplete")
             except:
                 pass
-'''
+
