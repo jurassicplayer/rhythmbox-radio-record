@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+    <schema path="/org/gnome/rhythmbox/plugins/radio_record/"
+            id="org.gnome.rhythmbox.plugins.radio_record">
+        <key type="s" name="music-dir">
+            <default>"XDG_MUSIC_DIR"</default>
+            <summary>The default directory to save recordings.</summary>
+            <description>The default directory to save recordings.</description>
+        </key>
+        <key type="b" name="create-subfolder">
+            <default>true</default>
+            <summary>Create a subfolder per radio station.</summary>
+            <description>Create a separate subfolder for each radio station.</description>
+        </key>
+        <key type="b" name="separate-stream">
+            <default>true</default>
+            <summary>Separates songs into individual files.</summary>
+            <description>Separates each song into individual files.</description>
+        </key>
+        <key type="b" name="auto-delete">
+            <default>true</default>
+            <summary>Automatically delete incomplete files.</summary>
+            <description>Automatically deletes incomplete files after stopping a recording.</description>
+        </key>
+    </schema>
+</schemalist>

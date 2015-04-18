@@ -17,7 +17,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA.
 
-from gi.repository import GObject, Gtk, GConf, Peas, RB, Gio
+from gi.repository import GObject, Gtk, Peas, RB, Gio
 import subprocess, os, time, threading, configparser, shutil, re, codecs, urllib
 
 class radioRecord (GObject.Object, Peas.Activatable):
@@ -128,7 +128,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
 
     def record_radio(self, action, *args):
         self.create_stop('record-radio')
-        recordprocess = StreamRipperProcess(self.uri, 'Music/')
+        recordprocess = StreamRipperProcess(self.uri)
         recordprocess.start()
         ## Add streamripper instance to dictionary
         self.runningDB.update({str(self.uri) : recordprocess})
@@ -147,7 +147,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
         
 
 class StreamRipperProcess(threading.Thread):
-    def __init__(self, uri, basedirectory):
+    def __init__(self, uri):
         threading.Thread.__init__(self)
         self.type = "streamripper"
         self.relay_port = None # streamripper relay port
@@ -157,14 +157,16 @@ class StreamRipperProcess(threading.Thread):
         self.song_num = 0 # number of ripped songs
         self.song_size = 0 # file size of all ripped songs (int, in kb)
         self.current_song_size = 0 # file size of currently ripping song (int, in kb)
-        self.basedirectory = basedirectory
+        self.settings = UserConfig()
+        self.basedirectory = self.get_music_dir()
         self.directory = self.basedirectory
-        self.create_subfolder = True
+        self.create_subfolder = self.settings.get_value('create-subfolder')
+        self.separate_stream = self.settings.get_value('separate-stream')
+        self.auto_delete = self.settings.get_value('auto-delete')
         self.killed = False
-        self.show_notifications = False
         self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
         self.plan_item = ""
-        self.single_file = False
+        self.basedirectory = 'Music/'
 
     def extract_uri(self, old_uri):
         try:
@@ -237,7 +239,23 @@ class StreamRipperProcess(threading.Thread):
         except Exception as e:
             print(e)
             return
-            
+    
+    def get_music_dir(self):
+        try:
+            setting_value = self.settings.get_value('music-dir')
+            if str(setting_value).replace("'","") == "XDG_MUSIC_DIR":
+                config_file = os.path.expanduser("~/.config/user-dirs.dirs")
+                f = open(config_file, 'r')
+                for line in f.read().splitlines():
+                    if line.startswith("XDG_MUSIC_DIR"):
+                        music_dir = line.split('=')[1].replace("\"","")
+                        music_dir = music_dir.replace("$HOME", os.path.expanduser("~"))
+            else:
+                music_dir = os.path.expanduser(str(setting_value).replace("'",""))
+        except:
+            music_dir = os.path.expanduser("~")
+        return music_dir
+    
     """
     Open the process
     """
@@ -249,7 +267,7 @@ class StreamRipperProcess(threading.Thread):
         options.append("-t")
         if self.create_subfolder == False:
             options.append("-s")
-        if self.single_file == True:
+        if self.separate_stream == False:
             options.append("-a")
             options.append("-A")
         options.append("-r")
@@ -277,7 +295,7 @@ class StreamRipperProcess(threading.Thread):
     """
     Terminate process & clean incomplete files if needed
     """
-    def stop(self, clean=False):
+    def stop(self):
         print("Stopping stream: "+str(self.uri))
 
         try:
@@ -285,9 +303,33 @@ class StreamRipperProcess(threading.Thread):
         except:
             pass
         # if an own subfolder is created, RecordProcess can delete incomplete files, else this must be done on program quit
-        if clean == True and self.create_subfolder == True:
+        if self.auto_delete == True and self.create_subfolder == True:
             try:
                 shutil.rmtree(self.directory + "/incomplete")
             except:
                 pass
 
+
+class UserConfig:
+    def __init__(self):
+        self.SCHEMA='org.gnome.rhythmbox.plugins.radio_record'
+        self.gsettings = Gio.Settings.new(self.SCHEMA)
+            
+    def get_value(self, key):
+        try:
+            if key == 'music-dir':
+                value = self.gsettings.get_value(key)
+            else:
+                value = self.gsettings.get_boolean(key)
+            print("Grabbing value for "+str(key)+" : "+ str(value))
+        except:
+            print("Couldn't get value")
+            value = self.gsettings.get_default_value(key)
+            print("Setting default value for "+ str(key) + " : " + str(value))
+            self.set_value(key, value)
+        return value
+    def set_value(self, key, value):
+        try:
+            self.gsettings.set_string(key, value)
+        except:
+            print("Failed to set setting.")
