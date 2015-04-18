@@ -166,7 +166,6 @@ class StreamRipperProcess(threading.Thread):
         self.killed = False
         self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
         self.plan_item = ""
-        self.basedirectory = 'Music/'
 
     def extract_uri(self, old_uri):
         try:
