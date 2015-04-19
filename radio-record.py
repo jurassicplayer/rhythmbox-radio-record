@@ -26,7 +26,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
     def __init__(self):
         GObject.Object.__init__(self)
     
-    def refresh_ui(self):
+    def refresh_ui(self, btn_refresh=False):
         try:
             shell = self.object
             page = shell.props.selected_page
@@ -36,63 +36,147 @@ class radioRecord (GObject.Object, Peas.Activatable):
             selected = page.get_entry_view().get_selected_entries()
             ## If selected has an entry
             if selected != []:
-                ## If that entry isn't the same as the previous
-                current_uri = selected[0].get_playback_uri()
-                if current_uri != self.uri:
-                    self.uri = current_uri
+                ## Set empty selected entries to stopped
+                multi_uri=[]
+                for entry, pointer in enumerate(selected):
+                    multi_uri.append(selected[entry].get_playback_uri())
                     try:
+                        status = self.runningDB[str(selected[entry].get_playback_uri())]
+                    except KeyError:
+                        self.runningDB.update({str(selected[entry].get_playback_uri()):'stopped'})
+                        status = 'stopped'
+                ## If selected entries have changed
+                if multi_uri != self.uri or btn_refresh == True:
+                    self.uri = multi_uri
+                    self.del_buttons()
+                    ## If there are multiple entries
+                    if len(multi_uri) > 1:
+                        
+                        '''
+                        SELECTED ENTRIES AND RUNNINGDB ARE NOT SYNONYMOUS. 
+                        I need to grab the status of selected entries, not all the ones that are in the runningDB.
+                        '''
+                        ## Convert runningDB values to temporary selected values
+                        self.stream_status = {}
+                        for x in multi_uri:
+                            self.stream_status.update({x:self.runningDB[x]})
+                        ## Multiline selections
+                        ## If entries are all stopped 
+                        if all(val == 'stopped' for val in self.stream_status.values()):
+                            print('All streams are stopped')
+                            self.create_record_all()
+                        ## If entries are all running
+                        elif all(val != 'stopped' for val in self.stream_status.values()):
+                            print('All streams are running')
+                            self.create_stop_all()
+                        ## If entries are mixed
+                        else:
+                            print('Mixed streams')
+                            self.create_toggle()
+                            self.create_record_all()
+                            self.create_stop_all()
+                            
+                    ## If there is only one entry
+                    else:
                         ## If the entry is stopped
-                        if self.runningDB[str(current_uri)] == 'stopped':
+                        if self.runningDB[str(selected[0].get_playback_uri())] == 'stopped':
                             print('Not recording')
-                            self.create_record('swap-entry')
-                            self.runningDB.update({str(current_uri):'stopped'})
+                            self.create_record()
+                            ## self.runningDB.update({str(current_uri):'stopped'})
                         ## If the entry is recording
                         else:
                             print('Recording')
-                            self.create_stop('swap-entry')
-                    except KeyError:
-                        print('Not recording')
-                        self.create_record('swap-entry')
-                        self.runningDB.update({str(current_uri):'stopped'})
+                            self.create_stop()
                 
         except Exception as e:
-            print(e)
+            print(e+" exceptioned")
             pass
         return True
         
+    '''
+    Create Buttons
+    '''    
     ## Create the recording button after stopping current recording.
-    def create_record(self, action, *args):
+    def create_record(self, *args):
         
         app = Gio.Application.get_default()
-        app.remove_plugin_menu_item('iradio-toolbar', self.status)
-        self.status = 'record-radio'
-        action = Gio.SimpleAction(name=self.status)
+        action = Gio.SimpleAction(name='record-radio')
         action.connect('activate', self.record_radio)
         app.add_action(action)
         
         item = Gio.MenuItem()
-        item.set_label(self.status.split('-')[0].capitalize())
-        item.set_detailed_action('app.'+self.status)
-        app.add_plugin_menu_item('iradio-toolbar', self.status, item)
+        item.set_label('Record')
+        item.set_detailed_action('app.record-radio')
+        app.add_plugin_menu_item('iradio-toolbar', 'record-radio', item)
         
         
     ## Create the stop button after starting a recording.
-    def create_stop(self, action, *args):
+    def create_stop(self, *args):
         
         app = Gio.Application.get_default()
-        app.remove_plugin_menu_item('iradio-toolbar', self.status)
-        self.status = 'stop-radio'
-        action = Gio.SimpleAction(name=self.status)
+        action = Gio.SimpleAction(name='stop-radio')
         action.connect('activate', self.stop_radio)
         app.add_action(action)
         
         item = Gio.MenuItem()
-        item.set_label(self.status.split('-')[0].capitalize())
-        item.set_detailed_action('app.'+self.status)
-        app.add_plugin_menu_item('iradio-toolbar', self.status, item)
+        item.set_label('Stop')
+        item.set_detailed_action('app.stop-radio')
+        app.add_plugin_menu_item('iradio-toolbar', 'stop-radio', item)
+        
 
+    ## Create the recording button after stopping current recording.
+    def create_toggle(self, *args):
+        
+        app = Gio.Application.get_default()
+        action = Gio.SimpleAction(name='toggle-radio')
+        action.connect('activate', self.toggle_radio)
+        app.add_action(action)
+        
+        item = Gio.MenuItem()
+        item.set_label('Toggle')
+        item.set_detailed_action('app.toggle-radio')
+        app.add_plugin_menu_item('iradio-toolbar', 'toggle-radio', item)
+    
+    
+    ## Create the recording button after stopping current recording.
+    def create_record_all(self, *args):
+        
+        app = Gio.Application.get_default()
+        action = Gio.SimpleAction(name='record-all')
+        action.connect('activate', self.record_all)
+        app.add_action(action)
+        
+        item = Gio.MenuItem()
+        item.set_label('Record All')
+        item.set_detailed_action('app.record-all')
+        app.add_plugin_menu_item('iradio-toolbar', 'record-all', item)
+        
+    
+    ## Create the recording button after stopping current recording.
+    def create_stop_all(self, *args):
+        
+        app = Gio.Application.get_default()
+        action = Gio.SimpleAction(name='stop-all')
+        action.connect('activate', self.stop_all)
+        app.add_action(action)
+        
+        item = Gio.MenuItem()
+        item.set_label('Stop All')
+        item.set_detailed_action('app.stop-all')
+        app.add_plugin_menu_item('iradio-toolbar', 'stop-all', item)
+
+    
+    ## Remove all buttons
+    def del_buttons(self, *args):
+        app = Gio.Application.get_default()
+        app.remove_plugin_menu_item('iradio-toolbar', 'stop-radio')
+        app.remove_plugin_menu_item('iradio-toolbar', 'record-radio')
+        app.remove_plugin_menu_item('iradio-toolbar', 'toggle-radio')
+        app.remove_plugin_menu_item('iradio-toolbar', 'stop-all')
+        app.remove_plugin_menu_item('iradio-toolbar', 'record-all')
+    
     def do_activate(self):
-        self.uri = ""
+        self.uri = []
         self.status = ""
         self.runningDB = {}
         
@@ -123,24 +207,55 @@ class radioRecord (GObject.Object, Peas.Activatable):
         
         del self.status
         del self.runningDB
+        del self.stream_status
         del self.uri
         GObject.source_remove(self.idle_id)
 
     def record_radio(self, action, *args):
-        self.create_stop('record-radio')
-        recordprocess = StreamRipperProcess(self.uri)
+        recordprocess = StreamRipperProcess(self.uri[0])
         recordprocess.start()
         ## Add streamripper instance to dictionary
-        self.runningDB.update({str(self.uri) : recordprocess})
-        
-        
+        self.runningDB.update({self.uri[0] : recordprocess})
+        self.refresh_ui(btn_refresh=True)
+    
     def stop_radio(self, action, *args):
-        self.create_record('stop-radio')
         ## Grab Streamripper instance from runningDB
-        recordprocess = self.runningDB[str(self.uri)]
+        recordprocess = self.runningDB[self.uri[0]]
         recordprocess.stop()
-        self.runningDB.update({str(self.uri):'stopped'})
+        self.runningDB.update({self.uri[0]:'stopped'})
+        self.refresh_ui(btn_refresh=True)
+    
+    def toggle_radio(self, action, *args):
+        for stream in self.stream_status:
+            if self.stream_status[stream] == 'stopped':
+                recordprocess = StreamRipperProcess(stream)
+                recordprocess.start()
+                ## Add streamripper instance to dictionary
+                self.runningDB.update({stream : recordprocess})
+            else:
+                recordprocess = self.runningDB[stream]
+                recordprocess.stop()
+                self.runningDB.update({stream:'stopped'})
+        self.refresh_ui(btn_refresh=True)
+    
+    def record_all(self, action, *args):
+        for stream in self.stream_status:
+            if self.runningDB[stream] == 'stopped':
+                recordprocess = StreamRipperProcess(stream)
+                recordprocess.start()
+                ## Add streamripper instance to dictionary
+                self.runningDB.update({stream : recordprocess})
+        self.refresh_ui(btn_refresh=True)
         
+    def stop_all(self, action, *args):
+        for stream in self.stream_status:
+            if self.runningDB[stream] != 'stopped':
+                ## Grab Streamripper instance from runningDB
+                recordprocess = self.runningDB[stream]
+                recordprocess.stop()
+                self.runningDB.update({stream:'stopped'})
+        self.refresh_ui(btn_refresh=True)
+    
     def tool_menu(self):
         print("I AM THE MIGHTY TOOL MENU")
         ## Need to add a UI to set all of the options for Streamripper.
@@ -277,7 +392,7 @@ class StreamRipperProcess(threading.Thread):
         print(options)
 
         try:
-            print("Starting stream process")
+            print("Starting stream: "+ final_uri)
             self.process = subprocess.Popen(options, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
         except OSError as e:
             print(_('Streamripper binary not found! ERROR: %s') % e)
