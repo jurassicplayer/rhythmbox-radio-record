@@ -287,7 +287,6 @@ class StreamRipperProcess(threading.Thread):
                 f = urllib.request.urlopen(str(first_uri))
                 url_info = str(f.info()).lower()
                 content_types = ['content-type: audio/mpeg', 'content-type: audio/ogg', 'content-type: audio/aac']
-                print(url_info)
                 if any(x in url_info for x in content_types):
                     break
                 else: 
@@ -418,7 +417,15 @@ class StreamRipperProcess(threading.Thread):
 
             self.killed = True
             return False
-
+    
+    def get_dir_size(self, path):
+        total_size = 0
+        for dirpath, dirnames, filenames, in os.walk(path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                total_size += os.path.getsize(fp)
+        return total_size
+    
     """
     Terminate process & clean incomplete files if needed
     """
@@ -432,8 +439,24 @@ class StreamRipperProcess(threading.Thread):
         # if an own subfolder is created, RecordProcess can delete incomplete files, else this must be done on program quit
         if self.auto_delete == True and self.create_subfolder == True:
             try:
-                shutil.rmtree(self.directory + "/incomplete")
-            except:
+                directories = os.walk(self.basedirectory)
+                watch_dir={}
+                del_folder = ''
+                ## Get all subdirectories in base directory and find all incomplete directories with last modified times.
+                for x in directories:
+                    if 'incomplete' in x[0]:
+                        last_modified = self.get_dir_size(x[0])
+                        watch_dir.update({x[0]:last_modified})
+                time.sleep(0.3)
+                for x in watch_dir:
+                    last_modified = self.get_dir_size(x)
+                    print(x)
+                    if last_modified == watch_dir[x]:
+                        del_folder = x
+                print('Deleting: '+del_folder)
+                shutil.rmtree(del_folder)
+            except Exception as e:
+                print(e + 'exception')
                 pass
 
 
