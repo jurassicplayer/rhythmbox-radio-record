@@ -18,7 +18,7 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA.
 
 from gi.repository import GObject, Gtk, Peas, RB, Gio
-import subprocess, os, time, threading, configparser, shutil, re, codecs, urllib
+import subprocess, os, time, threading, shutil, urllib
 
 class radioRecord (GObject.Object, Peas.Activatable):
     object = GObject.property (type = GObject.Object)
@@ -89,7 +89,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
                             self.create_stop()
                 
         except Exception as e:
-            print(e+" exceptioned")
+            print(e+" exceptioned") ## Surprisingly useful to keep as this broken line since it causes a second error and rhythmbox shows both errors in full.
             pass
         return True
         
@@ -203,9 +203,9 @@ class radioRecord (GObject.Object, Peas.Activatable):
                 recordprocess.stop()
         
         ## Remove toolbar button
-        app.remove_plugin_menu_item('iradio-toolbar', self.status)
-        
+        self.del_buttons()
         del self.status
+        del self.stream_status
         del self.runningDB
         del self.stream_status
         del self.uri
@@ -279,8 +279,8 @@ class StreamRipperProcess(threading.Thread):
         self.separate_stream = self.settings.get_value('separate-stream')
         self.auto_delete = self.settings.get_value('auto-delete')
         self.killed = False
-        self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
-        self.plan_item = ""
+        ## self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
+        ## self.plan_item = ""
 
     def extract_uri(self, old_uri):
         try:
