@@ -188,8 +188,8 @@ class radioRecord (GObject.Object, Peas.Activatable):
         
         item = Gio.MenuItem()
         item.set_label("Radio-Record")
-        item.set_detailed_action('app.radio-record')
-        app.add_plugin_menu_item('tools', 'radio-record', item)
+        item.set_detailed_action('app.radio-record-prefs')
+        app.add_plugin_menu_item('tools', 'radio-record-prefs', item)
         
         self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
         
@@ -281,18 +281,32 @@ class StreamRipperProcess(threading.Thread):
         self.killed = False
         ## self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
         ## self.plan_item = ""
-
+    
+    def recursive_hunt(self, first_uri):
+        while True:
+            try:
+                f = urllib.request.urlopen(str(first_uri))
+                url_info = str(f.info()).lower()
+                content_types = ['content-type: audio/mpeg', 'content-type: audio/ogg', 'content-type: audio/aac']
+                print(url_info)
+                if any(x in url_info for x in content_types):
+                    break
+                else: 
+                    print('Recursive link, hunting deeper')
+                    first_uri = self.extract_uri(first_uri)
+            except Exception as e:
+                ## When http response isn't known, it might be a stream, but without knowing the response I can't know for sure.
+                break
+        return first_uri
+    
+    
     def extract_uri(self, old_uri):
         try:
             f = urllib.request.urlopen(old_uri)
             url_info = str(f.info()).lower()
             
-            ## MP3 Stream ##
-            if "content-type: audio/mpeg" in url_info:
-                final_uri = old_uri
-            
             ## M3U/RAM Playlist ##
-            elif "content-type: audio/x-mpegurl" in url_info or "content-type: audio/x-pn-realaudio" in url_info:
+            if "content-type: audio/x-mpegurl" in url_info or "content-type: audio/x-pn-realaudio" in url_info:
                 print("This is a m3u playlist or ram playlist.")
                 ## Split all line breaks
                 url_data = f.read().decode('utf-8').splitlines()
@@ -346,12 +360,12 @@ class StreamRipperProcess(threading.Thread):
                 
             ## Unknown ##
             else:
-                print("I don't even know what this could be...another audio format?")
+                print("Audio format?")
                 final_uri = old_uri
                 
             return final_uri
         except Exception as e:
-            print(e)
+            print(e+"exceptioned")
             return
     
     def get_music_dir(self):
@@ -374,7 +388,7 @@ class StreamRipperProcess(threading.Thread):
     Open the process
     """
     def start(self):
-        final_uri = self.extract_uri(self.uri)
+        final_uri = self.recursive_hunt(self.uri)
         options = []
         options.append("streamripper")
         options.append(final_uri)
