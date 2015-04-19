@@ -207,7 +207,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
         del self.status
         del self.stream_status
         del self.runningDB
-        del self.stream_status
         del self.uri
         GObject.source_remove(self.idle_id)
 
