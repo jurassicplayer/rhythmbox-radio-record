@@ -19,6 +19,7 @@
 
 from gi.repository import GObject, Gtk, Peas, RB, Gio
 import subprocess, os, time, threading, shutil, urllib
+import timeit
 
 class radioRecord (GObject.Object, Peas.Activatable):
     object = GObject.property (type = GObject.Object)
@@ -92,10 +93,10 @@ class radioRecord (GObject.Object, Peas.Activatable):
             print(e+" exceptioned") ## Surprisingly useful to keep as this broken line since it causes a second error and rhythmbox shows both errors in full.
             pass
         return True
-        
     '''
     Create Buttons
-    '''    
+    '''
+        
     ## Create the recording button after stopping current recording.
     def create_record(self, *args):
         
@@ -192,6 +193,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
         app.add_plugin_menu_item('tools', 'radio-record-prefs', item)
         
         self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
+        self.refresh_stream_id = GObject.timeout_add(2000, self.refresh_stream)
         
     def do_deactivate(self):
         app = Gio.Application.get_default()
@@ -209,12 +211,15 @@ class radioRecord (GObject.Object, Peas.Activatable):
         del self.runningDB
         del self.uri
         GObject.source_remove(self.idle_id)
+        GObject.source_remove(self.refresh_stream_id)
 
     def record_radio(self, action, *args):
         recordprocess = StreamRipperProcess(self.uri[0])
         recordprocess.start()
         ## Add streamripper instance to dictionary
         self.runningDB.update({self.uri[0] : recordprocess})
+        if self.check_stream(recordprocess, self.uri[0]):
+            self.stream_error([self.uri[0]])
         self.refresh_ui(btn_refresh=True)
     
     def stop_radio(self, action, *args):
@@ -225,25 +230,38 @@ class radioRecord (GObject.Object, Peas.Activatable):
         self.refresh_ui(btn_refresh=True)
     
     def toggle_radio(self, action, *args):
+        dead_stream=[]
         for stream in self.stream_status:
             if self.stream_status[stream] == 'stopped':
                 recordprocess = StreamRipperProcess(stream)
                 recordprocess.start()
                 ## Add streamripper instance to dictionary
                 self.runningDB.update({stream : recordprocess})
+                if self.check_stream(recordprocess, stream):
+                    dead_stream.append(stream)
             else:
                 recordprocess = self.runningDB[stream]
                 recordprocess.stop()
                 self.runningDB.update({stream:'stopped'})
+        if dead_stream:
+            self.stream_error(dead_stream)
         self.refresh_ui(btn_refresh=True)
     
     def record_all(self, action, *args):
+        start_time = timeit.default_timer()
+        dead_stream=[]
         for stream in self.stream_status:
             if self.runningDB[stream] == 'stopped':
                 recordprocess = StreamRipperProcess(stream)
                 recordprocess.start()
                 ## Add streamripper instance to dictionary
                 self.runningDB.update({stream : recordprocess})
+                if self.check_stream(recordprocess, stream):
+                    dead_stream.append(stream)
+        if dead_stream:
+            self.stream_error(dead_stream)
+        elapsed_time = timeit.default_timer() - start_time
+        print(elapsed_time)
         self.refresh_ui(btn_refresh=True)
         
     def stop_all(self, action, *args):
@@ -258,7 +276,25 @@ class radioRecord (GObject.Object, Peas.Activatable):
     def tool_menu(self):
         print("I AM THE MIGHTY TOOL MENU")
         ## Need to add a UI to set all of the options for Streamripper.
+    
+    def check_stream(self, recordprocess, stream):
+        time.sleep(2.5)
+        status = recordprocess.poll_status()
+        if status == 'Ended':
+            self.runningDB.update({stream : 'stopped'})
+            dead_stream = stream
+        else:
+            dead_stream = None
+        return dead_stream
         
+    def stream_error(self, dead_streams):
+        dead_list=''
+        for stream in dead_streams:
+            dead_list += stream+'\n'
+        dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Streamripper failed to rip stream:\n'+dead_list)    
+        if dialog.run() == Gtk.ResponseType.CLOSE:
+            dialog.destroy()
+
 
 class StreamRipperProcess(threading.Thread):
     def __init__(self, uri):
@@ -277,7 +313,7 @@ class StreamRipperProcess(threading.Thread):
         self.create_subfolder = self.settings.get_value('create-subfolder')
         self.separate_stream = self.settings.get_value('separate-stream')
         self.auto_delete = self.settings.get_value('auto-delete')
-        self.killed = False
+        ## self.killed = False
         ## self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
         ## self.plan_item = ""
     
@@ -286,7 +322,8 @@ class StreamRipperProcess(threading.Thread):
             try:
                 f = urllib.request.urlopen(str(first_uri))
                 url_info = str(f.info()).lower()
-                content_types = ['content-type: audio/mpeg', 'content-type: audio/ogg', 'content-type: audio/aac']
+                text = 'content-type: audio/'
+                content_types = [text+'mpeg', text+'ogg', text+'aac']
                 if any(x in url_info for x in content_types):
                     break
                 else: 
@@ -300,65 +337,41 @@ class StreamRipperProcess(threading.Thread):
     
     def extract_uri(self, old_uri):
         try:
+            
             f = urllib.request.urlopen(old_uri)
             url_info = str(f.info()).lower()
-            
-            ## M3U/RAM Playlist ##
-            if "content-type: audio/x-mpegurl" in url_info or "content-type: audio/x-pn-realaudio" in url_info:
-                print("This is a m3u playlist or ram playlist.")
+            text = 'content-type: audio/'
+            playlist_type = [text+'x-mpegurl', text+'x-pn-realaudio', text+'x-scpls', text+'x-ms-asf', text+'x-quicktimeplayer']
+            content_type = next(playlist for playlist in playlist_type if playlist in url_info)
+            if content_type:
                 ## Split all line breaks
                 url_data = f.read().decode('utf-8').splitlines()
-                ## Remove all lines containing #
+                ## Remove all lines containing unneeded information
                 uri_data = []
-                for line in url_data:
-                    if '#' not in line:
-                        uri_data.append(line)
-                ## Use first uri in list
+                if content_type == playlist_type[0] or content_type == playlist_type[1]:
+                    for line in url_data:
+                        if '#' not in line:
+                            uri_data.append(line)
+                elif content_type == playlist_type[2]:
+                    for line in url_data:
+                        if 'file3=' in str(line).lower():
+                            uri_data.append(line.split('=')[1])
+                        if 'file2=' in str(line).lower():
+                            uri_data.append(line.split('=')[1])
+                        if 'file1=' in str(line).lower():
+                            uri_data.append(line.split('=')[1])
+                elif content_type == playlist_type[3]:
+                    url_data.replace("'",'"')
+                    for line in url_data:
+                        if 'ref href=' in line.lower():
+                            uri_data.append(line.split('"')[1])
+                elif content_type == playlist_type[4]:
+                    url_data.replace("'",'"')
+                    for line in url_data:
+                        if 'src="' in line.lower():
+                            uri_data.append(line.split('"')[1])
                 final_uri = uri_data[0]
-            
-            ## PLS Playlist ##
-            elif "content-type: audio/x-scpls" in url_info:
-                print("This is a pls playlist.")
-                ## Split all line breaks
-                url_data = f.read().decode('utf-8').splitlines()
-                ## Remove all lines that don't have reference link
-                uri_data = []
-                for line in url_data:
-                    if 'file1=' in str(line).lower():
-                        uri_data.append(line.split('=')[1])
-                ## Use first uri in list
-                final_uri = uri_data[0]
-                
-            ## ASX Playlist ##
-            elif "content-type: video/x-ms-asf" in url_info:
-                print("This is a asx playlist.")
-                ## Split all line breaks
-                url_data = f.read().decode('utf-8').splitlines()
-                url_data.replace("'",'"')
-                ## Remove all lines that don't have reference link
-                uri_data = []
-                for line in url_data:
-                    if 'ref href=' in line.lower():
-                        uri_data.append(line.split('"')[1])
-                ## Use first uri in list
-                final_uri = uri_data[0]
-            
-            ## QTL Playlist ##
-            elif "content-type: audio/x-quicktimeplayer" in url_info:
-                print("This is a qtl playlist.")
-                url_data = f.read().decode('utf-8').splitlines()
-                url_data.replace("'",'"')
-                ## Remove all lines that don't have reference link
-                uri_data = []
-                for line in url_data:
-                    if 'src="' in line.lower():
-                        uri_data.append(line.split('"')[1])
-                ## Use first uri in list
-                final_uri = uri_data[0]
-                
-            ## Unknown ##
             else:
-                print("Audio format?")
                 final_uri = old_uri
                 
             return final_uri
@@ -415,7 +428,7 @@ class StreamRipperProcess(threading.Thread):
             if dialog.run() == Gtk.ResponseType.CLOSE:
                 dialog.destroy()
 
-            self.killed = True
+            ## self.killed = True
             return False
     
     def get_dir_size(self, path):
@@ -441,24 +454,36 @@ class StreamRipperProcess(threading.Thread):
             try:
                 directories = os.walk(self.basedirectory)
                 watch_dir={}
+                recent_dir={}
                 del_folder = ''
                 ## Get all subdirectories in base directory and find all incomplete directories with last modified times.
                 for x in directories:
                     if 'incomplete' in x[0]:
-                        last_modified = self.get_dir_size(x[0])
-                        watch_dir.update({x[0]:last_modified})
+                        folder_size = self.get_dir_size(x[0])
+                        watch_dir.update({x[0]:folder_size})
                 time.sleep(0.3)
+                ## Check which incomplete directories are not changing.
                 for x in watch_dir:
-                    last_modified = self.get_dir_size(x)
-                    print(x)
-                    if last_modified == watch_dir[x]:
-                        del_folder = x
+                    folder_size = self.get_dir_size(x)
+                    if folder_size == watch_dir[x]:
+                        recent_dir.update({x:os.stat(x).st_mtime})
+                ## Get the most recent unchanging directory (hopefully the one that was most recently stopped)
+                del_folder = max(recent_dir, key=recent_dir.get)
                 print('Deleting: '+del_folder)
                 shutil.rmtree(del_folder)
             except Exception as e:
                 print(e + 'exception')
                 pass
-
+    """
+    Poll streamripper status
+    """
+    def poll_status(self):
+        print("Polling streamripper for status")
+        if self.process.poll() is None:
+            status = None
+        else:
+            status = 'Ended'
+        return status
 
 class UserConfig:
     def __init__(self):
