@@ -19,6 +19,7 @@
 
 from gi.repository import GObject, Gtk, Peas, RB, Gio
 import subprocess, os, time, threading, shutil, urllib
+import concurrent.futures
 import timeit
 
 class radioRecord (GObject.Object, Peas.Activatable):
@@ -213,59 +214,63 @@ class radioRecord (GObject.Object, Peas.Activatable):
         GObject.source_remove(self.refresh_stream_id)
 
     def record_radio(self, action, *args):
-        recordprocess = StreamRipperProcess(self.uri[0])
-        recordprocess.start()
-        ## Add streamripper instance to dictionary
-        self.runningDB.update({self.uri[0] : recordprocess})
+        self.start_stream(self.uri[0])
         self.refresh_ui(btn_refresh=True)
         self.refresh_stream()
     
     def stop_radio(self, action, *args):
-        ## Grab Streamripper instance from runningDB
-        recordprocess = self.runningDB[self.uri[0]]
-        recordprocess.stop()
-        self.runningDB.update({self.uri[0]:'stopped'})
+        self.stop_stream(self.uri[0])
         self.refresh_ui(btn_refresh=True)
     
     def toggle_radio(self, action, *args):
+        stream_start = []
+        stream_stop = []
         for stream in self.stream_status:
             if self.stream_status[stream] == 'stopped':
-                recordprocess = StreamRipperProcess(stream)
-                recordprocess.start()
-                ## Add streamripper instance to dictionary
-                self.runningDB.update({stream : recordprocess})
+                stream_start.append(stream)
             else:
-                recordprocess = self.runningDB[stream]
-                recordprocess.stop()
-                self.runningDB.update({stream:'stopped'})
+                self.stop_stream(stream)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_stream = dict((executor.submit(self.start_stream, stream), stream) for stream in stream_start)
         self.refresh_ui(btn_refresh=True)
         self.refresh_stream()
     
     def record_all(self, action, *args):
         start_time = timeit.default_timer()
+        stream_start = []
         for stream in self.stream_status:
             if self.runningDB[stream] == 'stopped':
-                recordprocess = StreamRipperProcess(stream)
-                recordprocess.start()
-                ## Add streamripper instance to dictionary
-                self.runningDB.update({stream : recordprocess})
+                stream_start.append(stream)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_stream = dict((executor.submit(self.start_stream, stream), stream) for stream in stream_start)
         elapsed_time = timeit.default_timer() - start_time
         print(elapsed_time)
         self.refresh_ui(btn_refresh=True)
         self.refresh_stream()
-        
+    
     def stop_all(self, action, *args):
+        stream_stop=[]
         for stream in self.stream_status:
             if self.runningDB[stream] != 'stopped':
-                ## Grab Streamripper instance from runningDB
-                recordprocess = self.runningDB[stream]
-                recordprocess.stop()
-                self.runningDB.update({stream:'stopped'})
+                self.stop_stream(stream)
+        ##        stream_stop.append(stream)
+        ##with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        ##    future_to_stream = dict((executor.submit(self.stop_stream, stream), stream) for stream in stream_stop)
         self.refresh_ui(btn_refresh=True)
     
     def tool_menu(self):
         print("I AM THE MIGHTY TOOL MENU")
         ## Need to add a UI to set all of the options for Streamripper.
+    
+    def start_stream(self, stream):
+        recordprocess = StreamRipperProcess(stream)
+        recordprocess.start()
+        self.runningDB.update({stream : recordprocess})
+        
+    def stop_stream(self, stream):
+        recordprocess = self.runningDB[stream]
+        recordprocess.stop()
+        self.runningDB.update({stream:'stopped'})
     
     def refresh_stream(self):
         time.sleep(2.5)
@@ -301,22 +306,13 @@ class StreamRipperProcess(threading.Thread):
     def __init__(self, uri):
         threading.Thread.__init__(self)
         self.type = "streamripper"
-        self.relay_port = None # streamripper relay port
-        self.stream_name = _('Unknown')
         self.uri = uri
-        self.song_info = _('Unknown')
-        self.song_num = 0 # number of ripped songs
-        self.song_size = 0 # file size of all ripped songs (int, in kb)
-        self.current_song_size = 0 # file size of currently ripping song (int, in kb)
         self.settings = UserConfig()
         self.basedirectory = self.get_music_dir()
         self.directory = self.basedirectory
         self.create_subfolder = self.settings.get_value('create-subfolder')
         self.separate_stream = self.settings.get_value('separate-stream')
         self.auto_delete = self.settings.get_value('auto-delete')
-        ## self.killed = False
-        ## self.record_until = True # False: record until stream info changes, True: record until user stops, int: Record until timestamp
-        ## self.plan_item = ""
     
     def recursive_hunt(self, first_uri):
         while True:
