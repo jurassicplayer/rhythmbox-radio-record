@@ -36,6 +36,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
                 return
             selected = page.get_entry_view().get_selected_entries()
             ## If selected has an entry
+
             if selected != []:
                 ## Set empty selected entries to stopped
                 multi_uri=[]
@@ -93,10 +94,11 @@ class radioRecord (GObject.Object, Peas.Activatable):
             print(e+" exceptioned") ## Surprisingly useful to keep as this broken line since it causes a second error and rhythmbox shows both errors in full.
             pass
         return True
+
+
     '''
     Create Buttons
     '''
-        
     ## Create the recording button after stopping current recording.
     def create_record(self, *args):
         
@@ -178,7 +180,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
     
     def do_activate(self):
         self.uri = []
-        self.status = ""
         self.runningDB = {}
         
         ## Create Tool Menu
@@ -193,7 +194,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
         app.add_plugin_menu_item('tools', 'radio-record-prefs', item)
         
         self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
-        self.refresh_stream_id = GObject.timeout_add(2000, self.refresh_stream)
         
     def do_deactivate(self):
         app = Gio.Application.get_default()
@@ -206,7 +206,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
         
         ## Remove toolbar button
         self.del_buttons()
-        del self.status
         del self.stream_status
         del self.runningDB
         del self.uri
@@ -218,9 +217,8 @@ class radioRecord (GObject.Object, Peas.Activatable):
         recordprocess.start()
         ## Add streamripper instance to dictionary
         self.runningDB.update({self.uri[0] : recordprocess})
-        if self.check_stream(recordprocess, self.uri[0]):
-            self.stream_error([self.uri[0]])
         self.refresh_ui(btn_refresh=True)
+        self.refresh_stream()
     
     def stop_radio(self, action, *args):
         ## Grab Streamripper instance from runningDB
@@ -230,39 +228,31 @@ class radioRecord (GObject.Object, Peas.Activatable):
         self.refresh_ui(btn_refresh=True)
     
     def toggle_radio(self, action, *args):
-        dead_stream=[]
         for stream in self.stream_status:
             if self.stream_status[stream] == 'stopped':
                 recordprocess = StreamRipperProcess(stream)
                 recordprocess.start()
                 ## Add streamripper instance to dictionary
                 self.runningDB.update({stream : recordprocess})
-                if self.check_stream(recordprocess, stream):
-                    dead_stream.append(stream)
             else:
                 recordprocess = self.runningDB[stream]
                 recordprocess.stop()
                 self.runningDB.update({stream:'stopped'})
-        if dead_stream:
-            self.stream_error(dead_stream)
         self.refresh_ui(btn_refresh=True)
+        self.refresh_stream()
     
     def record_all(self, action, *args):
         start_time = timeit.default_timer()
-        dead_stream=[]
         for stream in self.stream_status:
             if self.runningDB[stream] == 'stopped':
                 recordprocess = StreamRipperProcess(stream)
                 recordprocess.start()
                 ## Add streamripper instance to dictionary
                 self.runningDB.update({stream : recordprocess})
-                if self.check_stream(recordprocess, stream):
-                    dead_stream.append(stream)
-        if dead_stream:
-            self.stream_error(dead_stream)
         elapsed_time = timeit.default_timer() - start_time
         print(elapsed_time)
         self.refresh_ui(btn_refresh=True)
+        self.refresh_stream()
         
     def stop_all(self, action, *args):
         for stream in self.stream_status:
@@ -277,20 +267,31 @@ class radioRecord (GObject.Object, Peas.Activatable):
         print("I AM THE MIGHTY TOOL MENU")
         ## Need to add a UI to set all of the options for Streamripper.
     
-    def check_stream(self, recordprocess, stream):
+    def refresh_stream(self):
         time.sleep(2.5)
-        status = recordprocess.poll_status()
-        if status == 'Ended':
-            self.runningDB.update({stream : 'stopped'})
-            dead_stream = stream
-        else:
-            dead_stream = None
-        return dead_stream
-        
+        dead_stream = []
+        for stream in self.runningDB:
+            if self.runningDB[stream] != 'stopped':
+                status = self.runningDB[stream].poll_status()
+                if status == 'Ended':
+                    self.runningDB.update({stream:'stopped'})
+                    dead_stream.append(stream)
+        if dead_stream:
+            self.stream_error(dead_stream)
+            self.refresh_ui(btn_refresh=True)
+    
     def stream_error(self, dead_streams):
         dead_list=''
+        stream_name={}
+        shell = self.object
+        radio_page = shell.props.selected_page.props.base_query_model
+        for row in radio_page:
+            entry = row[0]
+            stream_uri = entry.get_playback_uri()
+            title = entry.get_string(RB.RhythmDBPropType.TITLE)
+            stream_name.update({stream_uri:title})
         for stream in dead_streams:
-            dead_list += stream+'\n'
+            dead_list += stream_name[stream]+'\n'
         dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Streamripper failed to rip stream:\n'+dead_list)    
         if dialog.run() == Gtk.ResponseType.CLOSE:
             dialog.destroy()
