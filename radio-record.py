@@ -19,7 +19,7 @@
 
 from gi.repository import GObject, Gtk, Peas, RB, Gio
 import subprocess, os, time, threading, shutil, urllib
-import concurrent.futures
+import concurrent.futures, rb
 import timeit
 
 class radioRecord (GObject.Object, Peas.Activatable):
@@ -168,7 +168,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
         item.set_label('Stop All')
         item.set_detailed_action('app.stop-all')
         app.add_plugin_menu_item('iradio-toolbar', 'stop-all', item)
-
+        
     
     ## Remove all buttons
     def del_buttons(self, *args):
@@ -179,40 +179,44 @@ class radioRecord (GObject.Object, Peas.Activatable):
         app.remove_plugin_menu_item('iradio-toolbar', 'stop-all')
         app.remove_plugin_menu_item('iradio-toolbar', 'record-all')
     
+    
+    """
+    Plugin Integration
+    """
     def do_activate(self):
         self.uri = []
         self.runningDB = {}
         
         ## Create Tool Menu
-        app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='Tool Menu')
-        action.connect('activate', self.tool_menu)
-        app.add_action(action)
+        self.create_tool_menu()
+        ## Create preferences menu
+        self.create_preferences_menu() 
         
-        item = Gio.MenuItem()
-        item.set_label("Radio-Record")
-        item.set_detailed_action('app.radio-record-prefs')
-        app.add_plugin_menu_item('tools', 'radio-record-prefs', item)
-        
+        ## Start idle loop
         self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
         
     def do_deactivate(self):
-        app = Gio.Application.get_default()
-        
         ## Stop all running recordings
         for station in self.runningDB:
             if self.runningDB[station] != 'stopped' and self.runningDB[station]:
                 recordprocess = self.runningDB[station]
                 recordprocess.stop()
-        
         ## Remove toolbar button
         self.del_buttons()
+        ## Remove tool menu item
+        app = Gio.Application.get_default()
+        app.remove_plugin_menu_item('tools', 'tool-menu')
+        ## Remove variables
+        del self.tool_menu
         del self.stream_status
         del self.runningDB
         del self.uri
+        ## Remove idle loop
         GObject.source_remove(self.idle_id)
-        GObject.source_remove(self.refresh_stream_id)
 
+    """
+    Button Actions
+    """
     def record_radio(self, action, *args):
         self.start_stream(self.uri[0])
         self.refresh_ui(btn_refresh=True)
@@ -257,11 +261,104 @@ class radioRecord (GObject.Object, Peas.Activatable):
         ##with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         ##    future_to_stream = dict((executor.submit(self.stop_stream, stream), stream) for stream in stream_stop)
         self.refresh_ui(btn_refresh=True)
+        
     
-    def tool_menu(self):
-        print("I AM THE MIGHTY TOOL MENU")
-        ## Need to add a UI to set all of the options for Streamripper.
+    """
+    Tool Menu
+    """
+    def init_tool_streams(self):
+        ## Grab information from a planned.ini file or something and dump them all into a dictionary of {key: []}
+        print('Get somewhere eventually')
+        
+    ## Create the tools menu item
+    def create_tool_menu(self, *args):
+        ## Insert tool menu item
+        item = Gio.MenuItem()
+        item.set_label("Radio-Record")
+        item.set_detailed_action('app.tool-menu')
+        app = Gio.Application.get_default()
+        action = Gio.SimpleAction(name='tool-menu')
+        action.connect('activate', self.open_pref_menu)  #### action.connect('activate', self.open_tool_menu)
+        app.add_action(action)
+        app.add_plugin_menu_item('tools', 'tool-menu', item)
+        
+        ## Create actual tool menu
+        '''
+        handlers = {
+            "onCancelTool": self.onCancelTool,
+            "onAcceptTool": self.onAcceptTool
+            }
+        self.tool_menu = Gtk.Builder()
+        self.tool_menu.add_from_file(rb.find_plugin_file(self, 'ui/tool_menu.ui'))
+        self.tool_menu.connect_signals(handlers)
+        self.init_tool_streams()
+        '''
     
+    def open_tool_menu(self, action, *args):
+        print("Open tool menu")
+        self.init_tool_streams()
+        '''
+        self.tool_menu.get_object("ToolWindow")
+        window.show_all()
+        '''
+    
+    """
+    Preferences Menu
+    """
+    def init_pref_settings(self):
+        settings = UserConfig()
+        music_dir = settings.get_value('music-dir')
+        create_subfolder = settings.get_value('create-subfolder')
+        separate_stream = settings.get_value('separate-stream')
+        auto_delete = settings.get_value('auto-delete')
+        self.pref_menu.get_object('save-folder-button').set_current_folder(music_dir)
+        self.pref_menu.get_object('create-subfolder-toggle').set_active(create_subfolder)
+        self.pref_menu.get_object('separate-stream-toggle').set_active(separate_stream)
+        self.pref_menu.get_object('auto-delete-toggle').set_active(auto_delete)
+        del settings
+        
+    ## Create the preferences menu item
+    def create_preferences_menu(self, *args):
+        ## Insert preferences menu into plugin manager
+        
+        
+        ## Create preferences menu
+        handlers = {
+            "onCancelPref": self.onCancelPref,
+            "onAcceptPref": self.onAcceptPref
+            }
+        self.pref_menu = Gtk.Builder()
+        self.pref_menu.add_from_file(rb.find_plugin_file(self, 'ui/preferences.ui'))
+        self.pref_menu.connect_signals(handlers)
+        self.init_pref_settings()
+
+    def open_pref_menu(self, action, *args):
+        self.init_pref_settings()
+        window = self.pref_menu.get_object("PrefWindow")
+        window.show_all()
+        
+    def onCancelPref(self, *args):
+        window = self.pref_menu.get_object('PrefWindow')
+        window.hide()
+    
+    def onAcceptPref(self, *args):
+        music_dir = self.pref_menu.get_object('save-folder-button').get_current_folder()
+        create_subfolder = self.pref_menu.get_object('create-subfolder-toggle').get_active()
+        separate_stream = self.pref_menu.get_object('separate-stream-toggle').get_active()
+        auto_delete = self.pref_menu.get_object('auto-delete-toggle').get_active()
+        settings = UserConfig()
+        settings.set_value('music-dir', music_dir)
+        settings.set_value('create-subfolder', create_subfolder)
+        settings.set_value('separate-stream', separate_stream)
+        settings.set_value('auto-delete', auto_delete)
+        print("Saved preferences")
+        del settings
+        window = self.pref_menu.get_object('PrefWindow')
+        window.hide()
+
+    """
+    Stream Management
+    """
     def start_stream(self, stream):
         recordprocess = StreamRipperProcess(stream)
         recordprocess.start()
@@ -308,8 +405,7 @@ class StreamRipperProcess(threading.Thread):
         self.type = "streamripper"
         self.uri = uri
         self.settings = UserConfig()
-        self.basedirectory = self.get_music_dir()
-        self.directory = self.basedirectory
+        self.basedirectory = self.settings.get_value('music-dir')
         self.create_subfolder = self.settings.get_value('create-subfolder')
         self.separate_stream = self.settings.get_value('separate-stream')
         self.auto_delete = self.settings.get_value('auto-delete')
@@ -375,22 +471,6 @@ class StreamRipperProcess(threading.Thread):
         except Exception as e:
             print(e+"exceptioned")
             return
-    
-    def get_music_dir(self):
-        try:
-            setting_value = self.settings.get_value('music-dir')
-            if str(setting_value).replace("'","") == "XDG_MUSIC_DIR":
-                config_file = os.path.expanduser("~/.config/user-dirs.dirs")
-                f = open(config_file, 'r')
-                for line in f.read().splitlines():
-                    if line.startswith("XDG_MUSIC_DIR"):
-                        music_dir = line.split('=')[1].replace("\"","")
-                        music_dir = music_dir.replace("$HOME", os.path.expanduser("~"))
-            else:
-                music_dir = os.path.expanduser(str(setting_value).replace("'",""))
-        except:
-            music_dir = os.path.expanduser("~")
-        return music_dir
     
     """
     Open the process
@@ -490,7 +570,7 @@ class UserConfig:
     def get_value(self, key):
         try:
             if key == 'music-dir':
-                value = self.gsettings.get_value(key)
+                value = self.get_full_dir(self.gsettings.get_value(key))
             else:
                 value = self.gsettings.get_boolean(key)
             print("Grabbing value for "+str(key)+" : "+ str(value))
@@ -502,6 +582,23 @@ class UserConfig:
         return value
     def set_value(self, key, value):
         try:
-            self.gsettings.set_string(key, value)
+            if key == 'music-dir':
+                self.gsettings.set_string(key, value)
+            else:
+                self.gsettings.set_boolean(key, value)
         except:
             print("Failed to set setting.")
+    def get_full_dir(self, value):
+        try:
+            if str(value).replace("'","") == "XDG_MUSIC_DIR":
+                config_file = os.path.expanduser("~/.config/user-dirs.dirs")
+                f = open(config_file, 'r')
+                for line in f.read().splitlines():
+                    if line.startswith("XDG_MUSIC_DIR"):
+                        music_dir = line.split('=')[1].replace("\"","")
+                        music_dir = music_dir.replace("$HOME", os.path.expanduser("~"))
+            else:
+                music_dir = os.path.expanduser(str(value).replace("'",""))
+        except:
+            music_dir = os.path.expanduser("~")
+        return music_dir

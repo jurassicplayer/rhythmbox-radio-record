@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk+" version="3.12"/>
+  <object class="GtkWindow" id="PrefWindow">
+    <property name="title">Radio-Record Preferences</property>
+    <property name="default-width">250</property>
+    <property name="default-height">300</property>
+    <property name="resizable">False</property>
+    <child>
+      <object class="GtkBox" id="MainContainer">
+        <property name="border-width">10</property>
+        <property name="orientation">vertical</property>
+        <property name="spacing">5</property>
+        <child>
+          <object class="GtkBox" id="Music-Dir">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">40</property>
+            <child>
+              <object class="GtkLabel" id="music-dir-label">
+                <property name="label" translatable="yes">Save Location:</property>
+                <attributes>
+                  <attribute name="weight" value="medium"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkFileChooserButton" id="save-folder-button">
+                <property name="halign">end</property>
+                <property name="action">select-folder</property>
+                <property name="title" translatable="yes">Select a Folder</property>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class= "GtkBox" id="Create-Subfolder">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">40</property>
+            <child>
+              <object class="GtkLabel" id="create-subfolder-label">
+                <property name="label" translatable="yes">Create a subfolder for each stream: </property>
+                <attributes>
+                  <attribute name="weight" value="medium"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkSwitch" id="create-subfolder-toggle">
+                <property name="active">True</property>
+                <property name="halign">end</property>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class= "GtkBox" id="Separate-Stream">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">40</property>
+            <child>
+              <object class="GtkLabel" id="separate-stream-label">
+                <property name="label" translatable="yes">Split stream into individual songs: </property>
+                <attributes>
+                  <attribute name="weight" value="medium"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkSwitch" id="separate-stream-toggle">
+                <property name="active">True</property>
+                <property name="halign">end</property>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class= "GtkBox" id="Auto-Delete">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">40</property>
+            <child>
+              <object class="GtkLabel" id="auto-delete-label">
+                <property name="label" translatable="yes">Automatically delete incomplete songs on stop: </property>
+                <attributes>
+                  <attribute name="weight" value="medium"/>
+                </attributes>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkSwitch" id="auto-delete-toggle">
+                <property name="active">True</property>
+                <property name="halign">end</property>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class= "GtkBox" id="Button-Container">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">5</property>
+            <child>
+              <object class="GtkButton" id="Cancel">
+                <property name="label" translatable="yes">Cancel</property>
+                <property name="halign">end</property>
+                <signal name="pressed" handler="onCancelPref" swapped="no"/>
+              </object>
+              <packing>
+                <property name="expand">True</property>
+                <property name="fill">True</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkButton" id="Accept">
+                <property name="label" translatable="yes">Accept</property>
+                <property name="halign">end</property>
+                <signal name="pressed" handler="onAcceptPref" swapped="no"/>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+              </packing>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>
