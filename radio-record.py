@@ -17,9 +17,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA.
 
-from gi.repository import GObject, Gtk, Peas, RB, Gio
-import subprocess, os, time, threading, shutil, urllib
-import concurrent.futures, rb
+from gi.repository import GObject, Gtk, Peas, RB, Gio, PeasGtk
+import subprocess, os, time, threading, shutil, urllib, concurrent.futures, rb
 import timeit
 
 class radioRecord (GObject.Object, Peas.Activatable):
@@ -189,8 +188,6 @@ class radioRecord (GObject.Object, Peas.Activatable):
         
         ## Create Tool Menu
         self.create_tool_menu()
-        ## Create preferences menu
-        self.create_preferences_menu() 
         
         ## Start idle loop
         self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
@@ -278,7 +275,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
         item.set_detailed_action('app.tool-menu')
         app = Gio.Application.get_default()
         action = Gio.SimpleAction(name='tool-menu')
-        action.connect('activate', self.open_pref_menu)  #### action.connect('activate', self.open_tool_menu)
+        action.connect('activate', self.open_tool_menu)
         app.add_action(action)
         app.add_plugin_menu_item('tools', 'tool-menu', item)
         
@@ -301,61 +298,7 @@ class radioRecord (GObject.Object, Peas.Activatable):
         self.tool_menu.get_object("ToolWindow")
         window.show_all()
         '''
-    
-    """
-    Preferences Menu
-    """
-    def init_pref_settings(self):
-        settings = UserConfig()
-        music_dir = settings.get_value('music-dir')
-        create_subfolder = settings.get_value('create-subfolder')
-        separate_stream = settings.get_value('separate-stream')
-        auto_delete = settings.get_value('auto-delete')
-        self.pref_menu.get_object('save-folder-button').set_current_folder(music_dir)
-        self.pref_menu.get_object('create-subfolder-toggle').set_active(create_subfolder)
-        self.pref_menu.get_object('separate-stream-toggle').set_active(separate_stream)
-        self.pref_menu.get_object('auto-delete-toggle').set_active(auto_delete)
-        del settings
         
-    ## Create the preferences menu item
-    def create_preferences_menu(self, *args):
-        ## Insert preferences menu into plugin manager
-        
-        
-        ## Create preferences menu
-        handlers = {
-            "onCancelPref": self.onCancelPref,
-            "onAcceptPref": self.onAcceptPref
-            }
-        self.pref_menu = Gtk.Builder()
-        self.pref_menu.add_from_file(rb.find_plugin_file(self, 'ui/preferences.ui'))
-        self.pref_menu.connect_signals(handlers)
-        self.init_pref_settings()
-
-    def open_pref_menu(self, action, *args):
-        self.init_pref_settings()
-        window = self.pref_menu.get_object("PrefWindow")
-        window.show_all()
-        
-    def onCancelPref(self, *args):
-        window = self.pref_menu.get_object('PrefWindow')
-        window.hide()
-    
-    def onAcceptPref(self, *args):
-        music_dir = self.pref_menu.get_object('save-folder-button').get_current_folder()
-        create_subfolder = self.pref_menu.get_object('create-subfolder-toggle').get_active()
-        separate_stream = self.pref_menu.get_object('separate-stream-toggle').get_active()
-        auto_delete = self.pref_menu.get_object('auto-delete-toggle').get_active()
-        settings = UserConfig()
-        settings.set_value('music-dir', music_dir)
-        settings.set_value('create-subfolder', create_subfolder)
-        settings.set_value('separate-stream', separate_stream)
-        settings.set_value('auto-delete', auto_delete)
-        print("Saved preferences")
-        del settings
-        window = self.pref_menu.get_object('PrefWindow')
-        window.hide()
-
     """
     Stream Management
     """
@@ -399,6 +342,9 @@ class radioRecord (GObject.Object, Peas.Activatable):
             dialog.destroy()
 
 
+"""
+Streamripper Process
+"""
 class StreamRipperProcess(threading.Thread):
     def __init__(self, uri):
         threading.Thread.__init__(self)
@@ -562,6 +508,9 @@ class StreamRipperProcess(threading.Thread):
             status = 'Ended'
         return status
 
+"""
+Super Simplistic Settings Manager
+"""
 class UserConfig:
     def __init__(self):
         self.SCHEMA='org.gnome.rhythmbox.plugins.radio_record'
@@ -602,3 +551,37 @@ class UserConfig:
         except:
             music_dir = os.path.expanduser("~")
         return music_dir
+
+"""
+Preferences Menu
+"""
+class Preferences(GObject.Object, PeasGtk.Configurable):
+    __gtype_name__ = 'Radio_Record_Preferences'
+    object = GObject.property(type=GObject.Object)
+    
+    def __init__(self):
+        GObject.Object.__init__(self)
+        self.settings = UserConfig()
+        
+    def do_create_configure_widget(self):
+        handlers = {
+            "onFileSet": self.onFileSet
+            }
+        self.pref_menu = Gtk.Builder()
+        self.pref_menu.add_from_file(rb.find_plugin_file(self, 'ui/preferences.ui'))
+        self.pref_menu.connect_signals(handlers)
+        ## Set current settings to preferences window 
+        self.pref_menu.get_object('save-folder-button').set_current_folder(self.settings.get_value('music-dir'))
+        self.pref_menu.get_object('create-subfolder-toggle').set_active(self.settings.get_value('create-subfolder'))
+        self.pref_menu.get_object('separate-stream-toggle').set_active(self.settings.get_value('separate-stream'))
+        self.pref_menu.get_object('auto-delete-toggle').set_active(self.settings.get_value('auto-delete'))
+        
+        ## Bind setting toggles to settings
+        self.settings.gsettings.bind('create-subfolder', self.pref_menu.get_object('create-subfolder-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
+        self.settings.gsettings.bind('separate-stream', self.pref_menu.get_object('separate-stream-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
+        self.settings.gsettings.bind('auto-delete', self.pref_menu.get_object('auto-delete-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
+        return self.pref_menu.get_object('PrefWindow')
+
+    def onFileSet(self, *args):
+        music_dir = self.pref_menu.get_object('save-folder-button').get_filename()
+        self.settings.set_value('music-dir', music_dir)
