@@ -21,326 +21,201 @@ from gi.repository import GObject, Gtk, Peas, RB, Gio, PeasGtk
 import subprocess, os, time, threading, shutil, urllib, concurrent.futures, rb
 import timeit
 
+
 class radioRecord (GObject.Object, Peas.Activatable):
     object = GObject.property (type = GObject.Object)
     
+    '''
+    Class variable StreamDB
+    Accessible to all instances of radioRecord
+    Shared to the tool menu (radioRecord.streamDB)
+    '''
+    streamDB ={}
+    
     def __init__(self):
         GObject.Object.__init__(self)
-    
-    def refresh_ui(self, btn_refresh=False):
-        try:
-            shell = self.object
-            page = shell.props.selected_page
-            if not hasattr(page, 'get_entry_view'):
-                print('No entry view')
-                return
-            selected = page.get_entry_view().get_selected_entries()
-            ## If selected has an entry
-
-            if selected != []:
-                ## Set empty selected entries to stopped
-                multi_uri=[]
-                for entry, pointer in enumerate(selected):
-                    multi_uri.append(selected[entry].get_playback_uri())
-                    try:
-                        status = self.runningDB[str(selected[entry].get_playback_uri())]
-                    except KeyError:
-                        self.runningDB.update({str(selected[entry].get_playback_uri()):'stopped'})
-                        status = 'stopped'
-                ## If selected entries have changed
-                if multi_uri != self.uri or btn_refresh == True:
-                    self.uri = multi_uri
-                    self.del_buttons()
-                    ## If there are multiple entries
-                    if len(multi_uri) > 1:
-                        
-                        '''
-                        SELECTED ENTRIES AND RUNNINGDB ARE NOT SYNONYMOUS. 
-                        I need to grab the status of selected entries, not all the ones that are in the runningDB.
-                        '''
-                        ## Convert runningDB values to temporary selected values
-                        self.stream_status = {}
-                        for x in multi_uri:
-                            self.stream_status.update({x:self.runningDB[x]})
-                        ## Multiline selections
-                        ## If entries are all stopped 
-                        if all(val == 'stopped' for val in self.stream_status.values()):
-                            print('All streams are stopped')
-                            self.create_record_all()
-                        ## If entries are all running
-                        elif all(val != 'stopped' for val in self.stream_status.values()):
-                            print('All streams are running')
-                            self.create_stop_all()
-                        ## If entries are mixed
-                        else:
-                            print('Mixed streams')
-                            self.create_toggle()
-                            self.create_record_all()
-                            self.create_stop_all()
-                            
-                    ## If there is only one entry
-                    else:
-                        ## If the entry is stopped
-                        if self.runningDB[str(selected[0].get_playback_uri())] == 'stopped':
-                            print('Not recording')
-                            self.create_record()
-                            ## self.runningDB.update({str(current_uri):'stopped'})
-                        ## If the entry is recording
-                        else:
-                            print('Recording')
-                            self.create_stop()
-                
-        except Exception as e:
-            print(e+" exceptioned") ## Surprisingly useful to keep as this broken line since it causes a second error and rhythmbox shows both errors in full.
-            pass
-        return True
-
-
-    '''
-    Create Buttons
-    '''
-    ## Create the recording button after stopping current recording.
-    def create_record(self, *args):
-        
-        app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='record-radio')
-        action.connect('activate', self.record_radio)
-        app.add_action(action)
-        
-        item = Gio.MenuItem()
-        item.set_label('Record')
-        item.set_detailed_action('app.record-radio')
-        app.add_plugin_menu_item('iradio-toolbar', 'record-radio', item)
-        
-        
-    ## Create the stop button after starting a recording.
-    def create_stop(self, *args):
-        
-        app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='stop-radio')
-        action.connect('activate', self.stop_radio)
-        app.add_action(action)
-        
-        item = Gio.MenuItem()
-        item.set_label('Stop')
-        item.set_detailed_action('app.stop-radio')
-        app.add_plugin_menu_item('iradio-toolbar', 'stop-radio', item)
-        
-
-    ## Create the recording button after stopping current recording.
-    def create_toggle(self, *args):
-        
-        app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='toggle-radio')
-        action.connect('activate', self.toggle_radio)
-        app.add_action(action)
-        
-        item = Gio.MenuItem()
-        item.set_label('Toggle')
-        item.set_detailed_action('app.toggle-radio')
-        app.add_plugin_menu_item('iradio-toolbar', 'toggle-radio', item)
-    
-    
-    ## Create the recording button after stopping current recording.
-    def create_record_all(self, *args):
-        
-        app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='record-all')
-        action.connect('activate', self.record_all)
-        app.add_action(action)
-        
-        item = Gio.MenuItem()
-        item.set_label('Record All')
-        item.set_detailed_action('app.record-all')
-        app.add_plugin_menu_item('iradio-toolbar', 'record-all', item)
-        
-    
-    ## Create the recording button after stopping current recording.
-    def create_stop_all(self, *args):
-        
-        app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='stop-all')
-        action.connect('activate', self.stop_all)
-        app.add_action(action)
-        
-        item = Gio.MenuItem()
-        item.set_label('Stop All')
-        item.set_detailed_action('app.stop-all')
-        app.add_plugin_menu_item('iradio-toolbar', 'stop-all', item)
-        
-    
-    ## Remove all buttons
-    def del_buttons(self, *args):
-        app = Gio.Application.get_default()
-        app.remove_plugin_menu_item('iradio-toolbar', 'stop-radio')
-        app.remove_plugin_menu_item('iradio-toolbar', 'record-radio')
-        app.remove_plugin_menu_item('iradio-toolbar', 'toggle-radio')
-        app.remove_plugin_menu_item('iradio-toolbar', 'stop-all')
-        app.remove_plugin_menu_item('iradio-toolbar', 'record-all')
     
     
     """
     Plugin Integration
     """
     def do_activate(self):
-        self.uri = []
-        self.runningDB = {}
+        print('Radio-record plugin activated')  #debug message
         
+        ## Initialize self variables
+        self.button_list = set()
+        self.selected = None
         ## Create Tool Menu
+        # Add tool menu entry to Tools menu
         self.create_tool_menu()
+        self.tool_window = Tool_Window()
         
-        ## Start idle loop
-        self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.refresh_ui)
+        ## Start idle loop ## keep track of when to start new streams, stop running ones, other time-based operations.
+        self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.idle_loop)
+        
+        ## Update toolbar only on iradio selection change
+        shell = self.object
+        self.radio_source = shell.get_source_by_entry_type(shell.props.db.entry_type_get_by_name("iradio"))
+        self.radio_source.get_entry_view().connect('selection-changed', self.update_toolbar)
         
     def do_deactivate(self):
+        print('Radio-record plugin deactivated')   #debug message
+        ## Remove toolbar buttons
+        self.delete_all_btn()
+        del self.button_list
+        ## Remove tool menu
+        app.remove_plugin_menu_item('tools', 'tool_menu')
+        self.tool_window.destroy()
         ## Stop all running recordings
-        for station in self.runningDB:
-            if self.runningDB[station] != 'stopped' and self.runningDB[station]:
-                recordprocess = self.runningDB[station]
+        for station in self.streamDB:
+            if self.streamDB[station]['status'] != 'stopped'and self.streamDB[station]['process']:
+                recordprocess = self.streamDB[station]['process']
                 recordprocess.stop()
-        ## Remove toolbar button
-        self.del_buttons()
-        ## Remove tool menu item
-        app = Gio.Application.get_default()
-        app.remove_plugin_menu_item('tools', 'tool-menu')
-        ## Remove variables
-        del self.tool_menu
-        del self.stream_status
-        del self.runningDB
-        del self.uri
-        ## Remove idle loop
+        
+        ## Remove Idle Loop
         GObject.source_remove(self.idle_id)
-
+        
+        ## Delete self variables
+        del self.selected
+        del self.streamDB
+        
     """
-    Button Actions
+    UI Loop Functions
     """
-    def record_radio(self, action, *args):
-        self.start_stream(self.uri[0])
-        self.refresh_ui(btn_refresh=True)
-        self.refresh_stream()
-    
-    def stop_radio(self, action, *args):
-        self.stop_stream(self.uri[0])
-        self.refresh_ui(btn_refresh=True)
-    
-    def toggle_radio(self, action, *args):
-        stream_start = []
-        stream_stop = []
-        for stream in self.stream_status:
-            if self.stream_status[stream] == 'stopped':
-                stream_start.append(stream)
+    def update_toolbar(self, *args):
+        print("updating toolbar")  #debug message
+        ## Remove old buttons
+        self.delete_all_btn()
+        ## Get status of currently selected entries or add entries if not in database
+        statuses = {}
+        self.selected = self.radio_source.get_entry_view().get_selected_entries()
+        for entry, pointer in enumerate(self.selected):
+            e = self.selected[entry]
+            uri = e.get_string(RB.RhythmDBPropType.LOCATION)
+            try: 
+                status = self.streamDB[uri]['status']
+            except KeyError:
+                stream_entry={
+                    'title' : e.get_string(RB.RhythmDBPropType.TITLE),
+                    'uri' : e.get_string(RB.RhythmDBPropType.LOCATION),
+                    'song_info' : '',
+                    'process' : '',
+                    'status' : 'stopped'
+                    }
+                self.streamDB.update({uri:stream_entry})
+                status = 'stopped'
+            statuses.update({uri:status})
+            
+        if len(statuses) > 1:
+            ## If entries are all stopped 
+            if all(val == 'stopped' for val in statuses.values()):
+                print('all stopped')
+                self.create_btn('record_all', 'Record All', 'toggle_record', 'record_all')
+            elif all(val != 'stopped' for val in statuses.values()):
+                print('all recording')
+                self.create_btn('stop_all', 'Stop All', 'toggle_record', 'stop_all')
             else:
-                self.stop_stream(stream)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_stream = dict((executor.submit(self.start_stream, stream), stream) for stream in stream_start)
-        self.refresh_ui(btn_refresh=True)
-        self.refresh_stream()
+                print('mixed recording')
+                self.create_btn('toggle_record', 'Toggle', 'toggle_record')
+                self.create_btn('record_all', 'Record All', 'toggle_record', 'record_all')
+                self.create_btn('stop_all', 'Stop All', 'toggle_record', 'stop_all')
+        else:
+            try:
+                ## If entry is stopped
+                if statuses[uri] == 'stopped':
+                    print('stream is stopped')
+                    self.create_btn('start_record', 'Record', 'toggle_record')
+                elif statuses[uri] != 'stopped':
+                    print('stream is recording')
+                    self.create_btn('stop_record', 'Stop', 'toggle_record')
+            except UnboundLocalError:
+                pass
     
-    def record_all(self, action, *args):
-        start_time = timeit.default_timer()
-        stream_start = []
-        for stream in self.stream_status:
-            if self.runningDB[stream] == 'stopped':
-                stream_start.append(stream)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_stream = dict((executor.submit(self.start_stream, stream), stream) for stream in stream_start)
-        elapsed_time = timeit.default_timer() - start_time
-        print(elapsed_time)
-        self.refresh_ui(btn_refresh=True)
-        self.refresh_stream()
+    def idle_loop(self, *args):
+        print("idle checking")  #debug message
     
-    def stop_all(self, action, *args):
-        stream_stop=[]
-        for stream in self.stream_status:
-            if self.runningDB[stream] != 'stopped':
-                self.stop_stream(stream)
-        ##        stream_stop.append(stream)
-        ##with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        ##    future_to_stream = dict((executor.submit(self.stop_stream, stream), stream) for stream in stream_stop)
-        self.refresh_ui(btn_refresh=True)
-        
     
     """
-    Tool Menu
+    UI Tool Menu Management
     """
-    def init_tool_streams(self):
-        ## Grab information from a planned.ini file or something and dump them all into a dictionary of {key: []}
-        print('Get somewhere eventually')
-        
-    ## Create the tools menu item
     def create_tool_menu(self, *args):
-        ## Insert tool menu item
+        ## Create Action to Perform
+        action = Gio.SimpleAction(name='tool_menu')
+        action.connect('activate', self.show_tool_menu)
+        ## Create Menu Entry
         item = Gio.MenuItem()
-        item.set_label("Radio-Record")
-        item.set_detailed_action('app.tool-menu')
+        item.set_label('Radio-Record')
+        item.set_detailed_action('app.tool_menu')
+        ## Insert Menu Entry
         app = Gio.Application.get_default()
-        action = Gio.SimpleAction(name='tool-menu')
-        action.connect('activate', self.open_tool_menu)
         app.add_action(action)
-        app.add_plugin_menu_item('tools', 'tool-menu', item)
+        app.add_plugin_menu_item('tools', 'tool_menu', item)
         
-        ## Create actual tool menu
-        '''
-        handlers = {
-            "onCancelTool": self.onCancelTool,
-            "onAcceptTool": self.onAcceptTool
-            }
-        self.tool_menu = Gtk.Builder()
-        self.tool_menu.add_from_file(rb.find_plugin_file(self, 'ui/tool_menu.ui'))
-        self.tool_menu.connect_signals(handlers)
-        self.init_tool_streams()
-        '''
+    def show_tool_menu(self, *args):
+        print('showing tool window')  #debug message
+        self.tool_window.show_all()
     
-    def open_tool_menu(self, action, *args):
-        print("Open tool menu")
-        self.init_tool_streams()
-        '''
-        self.tool_menu.get_object("ToolWindow")
-        window.show_all()
-        '''
         
+    """
+    UI Button Management
+    """
+    def create_btn(self, btn_id, label, func, *args):
+        try:
+            btn_arg = args[0]
+        except:
+            btn_arg = None
+        ## Create Action to Perform
+        action = Gio.SimpleAction(name=btn_id)
+        action.connect('activate', getattr(self, func), btn_arg)
+        action.connect('activate', self.update_toolbar)
+        ## Create Menu Entry
+        item = Gio.MenuItem()
+        item.set_label(label)
+        item.set_detailed_action('app.'+btn_id)
+        ## Insert Menu Entry
+        app = Gio.Application.get_default()
+        app.add_action(action)
+        app.add_plugin_menu_item('iradio-toolbar', btn_id, item)
+        self.button_list.add(btn_id)
+        
+    def delete_btn(self, btn_id, *args):
+        app = Gio.Application.get_default()
+        app.remove_plugin_menu_item('iradio-toolbar', btn_id)
+        
+    def delete_all_btn(self, *args):
+        for button in self.button_list:
+            self.delete_btn(button)
+    
+    
+    """
+    Button Recording Management
+    """
+    def toggle_record(self, action, unk, *args):
+        uris = []
+        for entry, pointer in enumerate(self.selected):
+            uris.append(self.selected[entry].get_playback_uri())
+        for uri in uris:
+            if self.streamDB[uri]['status'] == 'recording' and 'record_all' not in args:
+                self.stop_stream(uri)
+                self.streamDB[uri]['status'] = 'stopped'
+            elif self.streamDB[uri]['status'] == 'stopped' and 'stop_all' not in args:
+                self.start_stream(uri)
+                self.streamDB[uri]['status'] = 'recording'
+
+
     """
     Stream Management
     """
     def start_stream(self, stream):
         recordprocess = StreamRipperProcess(stream)
         recordprocess.start()
-        self.runningDB.update({stream : recordprocess})
+        self.streamDB[stream].update({'process' : recordprocess})
         
     def stop_stream(self, stream):
-        recordprocess = self.runningDB[stream]
+        print("stopping stream")
+        recordprocess = self.streamDB[stream]['process']
         recordprocess.stop()
-        self.runningDB.update({stream:'stopped'})
-    
-    def refresh_stream(self):
-        time.sleep(2.5)
-        dead_stream = []
-        for stream in self.runningDB:
-            if self.runningDB[stream] != 'stopped':
-                status = self.runningDB[stream].poll_status()
-                if status == 'Ended':
-                    self.runningDB.update({stream:'stopped'})
-                    dead_stream.append(stream)
-        if dead_stream:
-            self.stream_error(dead_stream)
-            self.refresh_ui(btn_refresh=True)
-    
-    def stream_error(self, dead_streams):
-        dead_list=''
-        stream_name={}
-        shell = self.object
-        radio_page = shell.props.selected_page.props.base_query_model
-        for row in radio_page:
-            entry = row[0]
-            stream_uri = entry.get_playback_uri()
-            title = entry.get_string(RB.RhythmDBPropType.TITLE)
-            stream_name.update({stream_uri:title})
-        for stream in dead_streams:
-            dead_list += stream_name[stream]+'\n'
-        dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Streamripper failed to rip stream:\n'+dead_list)    
-        if dialog.run() == Gtk.ResponseType.CLOSE:
-            dialog.destroy()
-
+        self.streamDB[stream].update({'process' : ''})
 
 """
 Streamripper Process
@@ -355,8 +230,126 @@ class StreamRipperProcess(threading.Thread):
         self.create_subfolder = self.settings.get_value('create-subfolder')
         self.separate_stream = self.settings.get_value('separate-stream')
         self.auto_delete = self.settings.get_value('auto-delete')
+        self.relay_port = ''
+        self.song_info = ''
+        self.stream_name = ''
+        self.song_num = 0
+        self.song_size = 0
+        self.current_song_size = 0
+        self.killed = False
+
     
-    def recursive_hunt(self, first_uri):
+    """
+    Open the process
+    """
+    def start(self):
+        final_uri = MiscTools.recursive_hunt(self.uri)
+        options = []
+        options.append("streamripper")
+        options.append(final_uri)
+        options.append("-t")
+        if self.create_subfolder == False:
+            options.append("-s")
+        if self.separate_stream == False:
+            options.append("-a")
+            options.append("-A")
+        options.append("-r")
+        options.append("-d")
+        options.append(self.basedirectory)
+
+        print("Starting streamripper: ")       
+        print(options)
+
+        try:
+            print("Starting stream: "+ final_uri)
+            self.process = subprocess.Popen(options, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
+        except OSError as e:
+            print(_('Streamripper binary not found! ERROR: %s') % e)
+            dialog = Gtk.MessageDialog(None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE,
+                     _('Streamripper not found!\nPlease install the streamripper package from your distribution or install it manually from: http://streamripper.sourceforge.net'))
+            dialog.set_title(_('Missing binary file'))
+            dialog.set_property("skip-taskbar-hint", False)
+            if dialog.run() == Gtk.ResponseType.CLOSE:
+                dialog.destroy()
+
+            self.killed = True
+            return False
+        t = threading.Thread(target=self.refresh_info)
+        t.start()
+    
+    
+    """
+    Terminate process & clean incomplete files if needed
+    """
+    def stop(self):
+        print("Stopping stream: "+str(self.uri))
+
+        try:
+            self.process.terminate()
+        except:
+            pass
+        if self.auto_delete == True and self.create_subfolder == True:
+            try:
+                ## Strip out invalid characters from folder name 
+                stream = self.stream_name.replace('~', '').replace('#', '').replace('%', '').replace('*', '').replace('{', '').replace('}', '').replace('\\', '').replace(':', '').replace('<', '').replace('>', '').replace('?', '').replace('/', '').replace('+', '').replace('|', '-').replace('"', '')
+                del_folder = self.basedirectory+"/"+stream+"/incomplete"
+                print('Deleting: '+del_folder)
+                shutil.rmtree(del_folder)
+            except Exception as e:
+                print(e + 'exception')
+                pass
+    
+    '''
+    def print_info(self):
+        print(self.relay_port)
+        print(self.stream_name) # Directory created is the same name as this (convert some characters to work for filesystem)
+        print(self.song_info)
+        print(self.song_num)
+        print(self.song_size)
+        print(self.current_song_size)
+    '''
+        
+    """
+    Poll streamripper status
+    """
+    def refresh_info(self):
+        print("Polling streamripper for status")
+        pout = self.process.stdout
+        while self.process.poll() == None:
+            line = ""
+            while True:
+                try:
+                    char = pout.read(1).decode("utf-8")
+                except:
+                    break
+                
+                if char == None or char == "":
+                    break
+                if char == "\n":
+                    break
+                if char == "\r":
+                    break
+                line = line+char
+            if line.startswith("relay port"):
+                self.relay_port = line.split(":")[1].strip()
+            if line.startswith("stream"):
+                self.stream_name = line.split(":")[1].strip()
+            if line.startswith("[ripping") or line.startswith("[skipping"):
+                if not (self.song_info == line[17:-10]):
+                    # When song info changes
+                    self.song_num += 1
+                    self.song_size = float(self.song_size) + float(self.current_song_size)
+                self.current_song_size = float( MiscTools.parse_size(line[len(line)-8:len(line)-1].strip()) )
+                self.song_info = line[17:-10]
+        self.killed = True
+        return False
+
+class MiscTools:
+    """
+    Recursively opens playlist urls to find the audio stream
+    returns: string
+    """
+    def recursive_hunt(first_uri):
         while True:
             try:
                 f = urllib.request.urlopen(str(first_uri))
@@ -372,18 +365,14 @@ class StreamRipperProcess(threading.Thread):
                 ## When http response isn't known, it might be a stream, but without knowing the response I can't know for sure.
                 break
         return first_uri
-    
-    
     def extract_uri(self, old_uri):
         try:
-            
             f = urllib.request.urlopen(old_uri)
             url_info = str(f.info()).lower()
             text = 'content-type: audio/'
             playlist_type = [text+'x-mpegurl', text+'x-pn-realaudio', text+'x-scpls', text+'x-ms-asf', text+'x-quicktimeplayer']
             content_type = next(playlist for playlist in playlist_type if playlist in url_info)
             if content_type:
-                ## Split all line breaks
                 url_data = f.read().decode('utf-8').splitlines()
                 ## Remove all lines containing unneeded information
                 uri_data = []
@@ -419,125 +408,49 @@ class StreamRipperProcess(threading.Thread):
             return
     
     """
-    Open the process
+    Parse size info e.g. 742kb, 1,2M to int in kb
+    returns: int size (in kb)
     """
-    def start(self):
-        final_uri = self.recursive_hunt(self.uri)
-        options = []
-        options.append("streamripper")
-        options.append(final_uri)
-        options.append("-t")
-        if self.create_subfolder == False:
-            options.append("-s")
-        if self.separate_stream == False:
-            options.append("-a")
-            options.append("-A")
-        options.append("-r")
-        options.append("-d")
-        options.append(self.basedirectory)
-
-        print("Starting streamripper: ")       
-        print(options)
-
-        try:
-            print("Starting stream: "+ final_uri)
-            self.process = subprocess.Popen(options, 0, None, subprocess.PIPE, subprocess.PIPE, subprocess.PIPE)
-        except OSError as e:
-            print(_('Streamripper binary not found! ERROR: %s') % e)
-            dialog = Gtk.MessageDialog(None, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT, Gtk.MessageType.ERROR, Gtk.ButtonsType.CLOSE,
-                     _('Streamripper not found!\nPlease install the streamripper package from your distribution or install it manually from: http://streamripper.sourceforge.net'))
-            dialog.set_title(_('Missing binary file'))
-            dialog.set_property("skip-taskbar-hint", False)
-            if dialog.run() == Gtk.ResponseType.CLOSE:
-                dialog.destroy()
-
-            ## self.killed = True
-            return False
-    
-    def get_dir_size(self, path):
-        total_size = 0
-        for dirpath, dirnames, filenames, in os.walk(path):
-            for f in filenames:
-                fp = os.path.join(dirpath, f)
-                total_size += os.path.getsize(fp)
-        return total_size
+    def parse_size(str):
+        format = ""
+        if str.strip() == "0b":
+            return 0
+        if "," in str:
+            intsize = int(str.split(",")[0])
+            floatsize = float( str[0:len(str)-2].replace(",", ".") )
+            format = str[len(str)-1:len(str)]
+            if format == "kb":
+                return intsize
+            if format == "M":
+                return floatsize*1000
+        format_kb = str[len(str)-2:len(str)]
+        format_mb = str[len(str)-1:len(str)]
+        if format_kb == "kb":
+            format = "kb"
+        if format_mb == "M":
+            format = "mb"
+        num = float( str[0:len(str)-2] )
+        if format == "kb":
+            return num
+        if format == "mb":
+            return num*1000
+        return num
+    """
+    Convert size (int) in kb to string (KB/MB/GB)
+    returns: string
+    """
+    def convert_size(size):
+        if size >= 1000000:
+            return str(size / 1000000) + " GB"
+        if size >= 1000:
+            return str(size / 1000) + " MB"
+        return str(size) + " KB"
     
     """
-    Terminate process & clean incomplete files if needed
+    Converts XDG_MUSIC_DIR and relative locations to full paths
+    returns: string
     """
-    def stop(self):
-        print("Stopping stream: "+str(self.uri))
-
-        try:
-            self.process.terminate()
-        except:
-            pass
-        # if an own subfolder is created, RecordProcess can delete incomplete files, else this must be done on program quit
-        if self.auto_delete == True and self.create_subfolder == True:
-            try:
-                directories = os.walk(self.basedirectory)
-                watch_dir={}
-                recent_dir={}
-                del_folder = ''
-                ## Get all subdirectories in base directory and find all incomplete directories with last modified times.
-                for x in directories:
-                    if 'incomplete' in x[0]:
-                        folder_size = self.get_dir_size(x[0])
-                        watch_dir.update({x[0]:folder_size})
-                time.sleep(0.3)
-                ## Check which incomplete directories are not changing.
-                for x in watch_dir:
-                    folder_size = self.get_dir_size(x)
-                    if folder_size == watch_dir[x]:
-                        recent_dir.update({x:os.stat(x).st_mtime})
-                ## Get the most recent unchanging directory (hopefully the one that was most recently stopped)
-                del_folder = max(recent_dir, key=recent_dir.get)
-                print('Deleting: '+del_folder)
-                shutil.rmtree(del_folder)
-            except Exception as e:
-                print(e + 'exception')
-                pass
-    """
-    Poll streamripper status
-    """
-    def poll_status(self):
-        print("Polling streamripper for status")
-        if self.process.poll() is None:
-            status = None
-        else:
-            status = 'Ended'
-        return status
-
-"""
-Super Simplistic Settings Manager
-"""
-class UserConfig:
-    def __init__(self):
-        self.SCHEMA='org.gnome.rhythmbox.plugins.radio_record'
-        self.gsettings = Gio.Settings.new(self.SCHEMA)
-            
-    def get_value(self, key):
-        try:
-            if key == 'music-dir':
-                value = self.get_full_dir(self.gsettings.get_value(key))
-            else:
-                value = self.gsettings.get_boolean(key)
-            print("Grabbing value for "+str(key)+" : "+ str(value))
-        except:
-            print("Couldn't get value")
-            value = self.gsettings.get_default_value(key)
-            print("Setting default value for "+ str(key) + " : " + str(value))
-            self.set_value(key, value)
-        return value
-    def set_value(self, key, value):
-        try:
-            if key == 'music-dir':
-                self.gsettings.set_string(key, value)
-            else:
-                self.gsettings.set_boolean(key, value)
-        except:
-            print("Failed to set setting.")
-    def get_full_dir(self, value):
+    def get_full_dir(value):
         try:
             if str(value).replace("'","") == "XDG_MUSIC_DIR":
                 config_file = os.path.expanduser("~/.config/user-dirs.dirs")
@@ -552,6 +465,35 @@ class UserConfig:
             music_dir = os.path.expanduser("~")
         return music_dir
 
+"""
+Super Simplistic Settings Manager
+"""
+class UserConfig:
+    def __init__(self):
+        self.SCHEMA='org.gnome.rhythmbox.plugins.radio_record'
+        self.gsettings = Gio.Settings.new(self.SCHEMA)
+            
+    def get_value(self, key):
+        try:
+            if key == 'music-dir':
+                value = MiscTools.get_full_dir(self.gsettings.get_value(key))
+            else:
+                value = self.gsettings.get_boolean(key)
+            print("Grabbing value for "+str(key)+" : "+ str(value))
+        except:
+            print("Couldn't get value")
+            value = self.gsettings.get_default_value(key)
+            self.set_value(key, value)
+        return value
+    def set_value(self, key, value):
+        try:
+            if key == 'music-dir':
+                self.gsettings.set_string(key, value)
+            else:
+                self.gsettings.set_boolean(key, value)
+        except:
+            print("Failed to set setting.")
+    
 """
 Preferences Menu
 """
@@ -572,16 +514,177 @@ class Preferences(GObject.Object, PeasGtk.Configurable):
         self.pref_menu.connect_signals(handlers)
         ## Set current settings to preferences window 
         self.pref_menu.get_object('save-folder-button').set_current_folder(self.settings.get_value('music-dir'))
-        self.pref_menu.get_object('create-subfolder-toggle').set_active(self.settings.get_value('create-subfolder'))
-        self.pref_menu.get_object('separate-stream-toggle').set_active(self.settings.get_value('separate-stream'))
-        self.pref_menu.get_object('auto-delete-toggle').set_active(self.settings.get_value('auto-delete'))
-        
-        ## Bind setting toggles to settings
-        self.settings.gsettings.bind('create-subfolder', self.pref_menu.get_object('create-subfolder-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
-        self.settings.gsettings.bind('separate-stream', self.pref_menu.get_object('separate-stream-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
-        self.settings.gsettings.bind('auto-delete', self.pref_menu.get_object('auto-delete-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
+        settings = ['create-subfolder', 'separate-stream', 'auto-delete']
+        for entry in settings:
+            self.pref_menu.get_object(entry+'-toggle').set_active(self.settings.get_value(entry))
+            ## Bind setting toggles to settings
+            self.settings.gsettings.bind(entry, self.pref_menu.get_object(entry+'-toggle'), 'active', Gio.SettingsBindFlags.DEFAULT)
+            
         return self.pref_menu.get_object('PrefWindow')
 
     def onFileSet(self, *args):
         music_dir = self.pref_menu.get_object('save-folder-button').get_filename()
         self.settings.set_value('music-dir', music_dir)
+        
+"""
+Tools Menu - Record and Plan Manager
+"""
+class Tool_Window(Gtk.Window):
+    def __init__(self, *args): ## Need runningDB, rhythmbox radio stations,
+        for arg in args:
+            print(arg)
+        Gtk.Window.__init__(self, title="Radio-Record Tools")
+        self.set_default_geometry(550,300)
+        self.set_border_width(5)
+        
+        """
+        Main Container
+        parent: tool window
+        """
+        main_container = Gtk.Box(spacing=5)
+        main_container.set_orientation(Gtk.Orientation.VERTICAL)
+        self.add(main_container)
+        
+        """
+        Main Stack Container
+        parent: main container
+        """
+        self.stack_container = stack_container = Gtk.Stack()
+        stack_container.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        stack_container.set_transition_duration(500)
+        stack_switcher = Gtk.StackSwitcher()
+        stack_switcher.set_stack(stack_container)
+        main_container.add(stack_switcher)
+        stack_switcher.set_halign(Gtk.Align.CENTER)
+        main_container.pack_start(stack_container, True, True, 0)
+        
+        """
+        Record Manager Container
+        parent: main stack
+        """
+        record_manager = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        stack_container.add_titled(record_manager, "record-manager", "Record")
+        ## Scrollable Treeview
+        
+        ## Button Bar
+        button_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        stop_btn = self.generate_button(Gtk.STOCK_STOP, "Stop", "onStopRecord")
+        stop_all_btn = self.generate_button(Gtk.STOCK_CLEAR, "Stop all", "onStopRecord", "all")
+        button_bar.add(stop_btn)
+        button_bar.add(stop_all_btn)
+        record_manager.add(button_bar)
+        
+        """
+        Plan Manager Container
+        parent: main stack
+        """
+        self.plan_manager = plan_manager = Gtk.Stack()
+        plan_manager.set_transition_type(Gtk.StackTransitionType.SLIDE_UP_DOWN)
+        plan_manager.set_transition_duration(500)
+        plan_view_edit_switcher = Gtk.StackSwitcher()
+        plan_view_edit_switcher.set_stack(plan_manager)
+        stack_container.add_titled(plan_manager, "plan-manager", "Plan")
+        
+        """
+        Plan Viewer Container
+        parent: plan manager
+        """
+        plan_viewer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        plan_manager.add_named(plan_viewer, "plan-viewer")
+        
+        ## Button bar
+        button_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        add_btn = self.generate_button(Gtk.STOCK_ADD, "Add", "onEdit", "add")
+        edit_btn = self.generate_button(Gtk.STOCK_EDIT, "Edit", "onEdit")
+        delete_btn = self.generate_button(Gtk.STOCK_DELETE, "Delete", "onDelete")
+        button_bar.add(add_btn)
+        button_bar.add(edit_btn)
+        button_bar.add(delete_btn)
+        plan_viewer.add(button_bar)
+        
+        """
+        Plan Editor Container
+        parent: plan manager
+        """
+        plan_editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        plan_manager.add_named(plan_editor, "plan-editor")
+        
+        ## Button bar
+        button_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        save_btn = self.generate_button(Gtk.STOCK_SAVE, "Save", "onSave")
+        cancel_btn = self.generate_button(Gtk.STOCK_CANCEL, "Cancel", "onCancel")
+        button_bar.pack_end(save_btn, False, False, 0)
+        button_bar.pack_end(cancel_btn, False, False, 0)
+        plan_editor.add(button_bar)
+        
+        
+        """
+        Close Button
+        parent: main container
+        """
+        close_btn = self.generate_button(Gtk.STOCK_CLOSE, "Close", "onClose")
+        main_container.pack_end(close_btn, False, False, 0)
+        
+    
+    def generate_button(self, image, label, action, *args):
+        try:
+            btn_arg = args[0]
+        except:
+            btn_arg = None
+        button = Gtk.Button.new_from_icon_name(image, Gtk.IconSize.BUTTON)
+        button.set_always_show_image(True)
+        button.set_label(label)
+        button.connect("clicked", getattr(self, action), btn_arg)
+        return button
+    
+    """
+    Record Manager Button Functions
+    """
+    def onStopRecord(self, *args):
+        stream_list=[]
+        if "all" in args:
+            print('stop all recordings') ## Just get list of streams to stop
+            '''
+            for entry in everything:
+                .get_something something value
+            stream_list.append(uri)
+            '''
+        else:
+            print('stopping recording')
+            '''
+            for entry in selected:
+                .get_something something value
+            stream_list.append(uri)
+            '''
+        ## stop streams here
+        for stream in stream_list:
+            self.stop_stream(stream)
+    """
+    Tool Menu Stream Management
+    """
+    def stop_stream(self, stream):
+        print("stopping stream")
+        recordprocess = radioRecord.streamDB[stream]['process']
+        recordprocess.stop()
+        radioRecord.streamDB[stream].update({'process' : ''})
+    
+
+    """
+    Plan Manager Button Functions
+    """
+    def onEdit(self, *args):
+        if "add" in args:
+            print("Initializing options")
+        self.plan_manager.set_visible_child_name('plan-editor')
+    def onDelete(self, *args):
+        print('deleting plan')
+    def onCancel(self, *args):
+        self.plan_manager.set_visible_child_name('plan-viewer')
+    def onSave(self, *args):
+        print('saving plan')
+        self.plan_manager.set_visible_child_name('plan-viewer')
+    """
+    Main Container Button Functions
+    """
+    def onClose(self, *args):
+        self.hide()
