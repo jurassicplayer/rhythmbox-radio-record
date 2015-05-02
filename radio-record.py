@@ -361,13 +361,6 @@ class StreamRipperProcess(threading.Thread):
                 dialog.destroy()
         return False
         
-        def stream_error(self):
-            dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Streamripper failed to rip stream:\n'+self.uri)
-            radioRecord.streamDB[self.uri]['status'] = 'stopped'
-            radioRecord.streamDB[self.uri]['process'] = ''
-            if dialog.run() == Gtk.ResponseType.CLOSE:
-                dialog.destroy()
-        
 
 class MiscTools:
     """
