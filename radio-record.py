@@ -18,15 +18,9 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA.
 
 from gi.repository import GObject, Gtk, Peas, RB, Gio, PeasGtk
-import subprocess, os, time, threading, shutil, urllib, concurrent.futures, rb
+import subprocess, os, time, threading, shutil, urllib, concurrent.futures, rb , pickle
 import timeit
 
-temp_planning_list = [
-    ('Station', 'Stream', 0, 'SMTWHFA', 8, 30, 45),
-    ('AnimeNfo', 'http://itori.animenfo.com:443/listen.pls', 0, 'MWF', 9, 30, 120),
-    ('Station', 'Stream', 0, 'SA', 8, 30, 45),
-    ('Station', 'Stream', 0, 'TH', 8, 30, 45)
-    ]
 
 class radioRecord (GObject.Object, Peas.Activatable):
     object = GObject.property (type = GObject.Object)
@@ -51,18 +45,21 @@ class radioRecord (GObject.Object, Peas.Activatable):
         ## Initialize self variables
         self.button_list = set()
         self.selected = None
+        
+        ## Update toolbar only on iradio selection change
+        shell = self.object        
+        self.radio_source = shell.get_source_by_entry_type(shell.props.db.entry_type_get_by_name("iradio"))
+        self.radio_source.get_entry_view().connect('selection-changed', self.update_toolbar)
+
         ## Create Tool Menu
         # Add tool menu entry to Tools menu
         self.create_tool_menu()
-        self.tool_window = Tool_Window()
+        self.tool_window = Tool_Window(shell)
         
         ## Start idle loop ## keep track of when to start new streams, stop running ones, other time-based operations.
         self.idle_id = GObject.timeout_add(GObject.PRIORITY_DEFAULT_IDLE, self.idle_loop)
         
-        ## Update toolbar only on iradio selection change
-        shell = self.object
-        self.radio_source = shell.get_source_by_entry_type(shell.props.db.entry_type_get_by_name("iradio"))
-        self.radio_source.get_entry_view().connect('selection-changed', self.update_toolbar)
+        
         
     def do_deactivate(self):
         print('Radio-record plugin deactivated')   #debug message
@@ -146,8 +143,27 @@ class radioRecord (GObject.Object, Peas.Activatable):
                 pass
     
     def idle_loop(self, *args):
-        print("idle checking")  #debug message
-    
+        #print("idle checking")  #debug message
+        dead_streams = []
+        dead_string = ''
+        for uri in self.streamDB:
+            if self.streamDB[uri]['status'] == 'recording' and self.streamDB[uri]['process'] == 'dead':
+                dead_streams.append(uri)
+            if self.streamDB[uri]['status'] == 'refresh':
+                self.streamDB[uri]['status'] = 'stopped'
+                self.update_toolbar()
+        if dead_streams:
+            for uri in dead_streams:
+                print(uri)
+                dead_string += self.streamDB[uri]['title']+'\n'
+                radioRecord.streamDB[uri]['status'] = 'stopped'
+                radioRecord.streamDB[uri]['process'] = ''
+            dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Streamripper failed to rip stream:\n'+dead_string)
+            self.update_toolbar()
+            if dialog.run() == Gtk.ResponseType.CLOSE:
+                dialog.destroy()
+        return True
+
     
     """
     UI Tool Menu Management
@@ -167,9 +183,9 @@ class radioRecord (GObject.Object, Peas.Activatable):
         
     def show_tool_menu(self, *args):
         print('showing tool window')  #debug message
-        self.tool_window.show_all()
         self.tool_window.visible = True
-    
+        self.tool_window.show_all()
+        
         
     """
     UI Button Management
@@ -353,12 +369,7 @@ class StreamRipperProcess(threading.Thread):
             radioRecord.streamDB[self.uri]['song_num'] = self.song_num
             radioRecord.streamDB[self.uri]['song_size'] = self.song_size
         self.killed = True
-        if radioRecord.streamDB[self.uri]['status'] != 'stopped':
-            dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Streamripper failed to rip stream:\n'+radioRecord.streamDB[self.uri]['title'])
-            radioRecord.streamDB[self.uri]['status'] = 'stopped'
-            radioRecord.streamDB[self.uri]['process'] = ''
-            if dialog.run() == Gtk.ResponseType.CLOSE:
-                dialog.destroy()
+        radioRecord.streamDB[self.uri]['process'] = 'dead'
         return False
         
 
@@ -550,11 +561,21 @@ class Preferences(GObject.Object, PeasGtk.Configurable):
 Tools Menu - Record and Plan Manager
 """
 class Tool_Window(Gtk.Window):
-    def __init__(self, *args):
+    def __init__(self, shell, *args):
         self.visible = None
         Gtk.Window.__init__(self, title="Radio-Record Tools")
+        self.connect('delete-event', self.onClose)
         self.set_default_geometry(550,300)
         self.set_border_width(5)
+        self.shell = shell
+            
+        """
+        Initialize pickled data 
+        """
+        try:
+            self.planDB = pickle.load(open('planned.pkl', 'rb'))
+        except:
+            self.planDB = {}
         
         """
         Main Container
@@ -625,6 +646,24 @@ class Tool_Window(Gtk.Window):
         """
         plan_viewer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         plan_manager.add_named(plan_viewer, "plan-viewer")
+        ## Treeview
+        self.planner_liststore = planner_liststore = Gtk.ListStore(str, str, str, str)
+        planner_liststore.set_sort_func(1, self.sort_weekday, None)
+        planner_liststore.set_sort_func(2, self.sort_start_time, None)
+        planner_liststore.set_sort_func(3, self.sort_duration, None)
+        self.plan_treeview = plan_treeview = Gtk.TreeView.new_with_model(planner_liststore)
+        ts = plan_treeview.get_selection()
+        ts.set_mode(Gtk.SelectionMode.SINGLE)
+        for i, column_title in enumerate(['Station', 'Repeat', 'Start Time', 'Duration']):
+            renderer = Gtk.CellRendererText()
+            column = Gtk.TreeViewColumn(column_title, renderer, text=i)
+            column.set_sort_column_id(i)
+            plan_treeview.append_column(column)
+        ## Scroll Window
+        scrollable_treelist = Gtk.ScrolledWindow()
+        scrollable_treelist.set_vexpand(True)
+        scrollable_treelist.add(plan_treeview)
+        plan_viewer.pack_start(scrollable_treelist, True, True, 0)
         
         ## Button bar
         button_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -665,7 +704,7 @@ class Tool_Window(Gtk.Window):
         
         editor_options.attach(start_time_label, 0,2,1*colon_multiplier,1)
         
-        self.hour_time = hour_time = Gtk.SpinButton.new_with_range(0,12,1)
+        self.hour_time = hour_time = Gtk.SpinButton.new_with_range(1,12,1)
         editor_options.attach(hour_time, 0,3,1*colon_multiplier,1)
         
         editor_options.attach(time_colon, 1*colon_multiplier,3,1,1)
@@ -759,8 +798,10 @@ class Tool_Window(Gtk.Window):
                 self.record_liststore[listDB[entry]] = info
             except KeyError:
                 self.record_liststore.append(info)
-                
     
+    """
+    Record Manager Column Sorting
+    """
     def sort_song_num(self, model, row1, row2, data):
         sort_column, _ = model.get_sort_column_id()
         value1 = model.get_value(row1, sort_column)
@@ -774,6 +815,77 @@ class Tool_Window(Gtk.Window):
         else:
             return 1
     
+    
+    """
+    Plan Manager Column Sorting
+    """
+    def sort_weekday(self, model, row1, row2, data):
+        sort_column, _ = model.get_sort_column_id()
+        value1 = model.get_value(row1, sort_column)
+        value2 = model.get_value(row2, sort_column)
+        print('sort by weekday')
+        if '-' in value1 and '-' not in value2:
+            return -1
+        elif '-' not in value1 and '-' in value2:
+            return 1
+        elif value1 == value2:
+            return 0
+        else:
+            values = []
+            for value in [value1, value2]:
+                end_value = 0
+                for i in range(0, len(value)):
+                    if value[i] == 'U':
+                        end_value += 128
+                    if value[i] == 'M':
+                        end_value += 64
+                    if value[i] == 'T':
+                        end_value += 32
+                    if value[i] == 'W':
+                        end_value += 16
+                    if value[i] == 'R':
+                        end_value += 8
+                    if value[i] == 'F':
+                        end_value += 4
+                    if value[i] == 'S':
+                        end_value += 2
+                print(end_value)
+                values.append(end_value)
+            if values[0] < values[1]:
+                return -1
+            elif values[0] == values[1]:
+                return 0
+            else:
+                return 1
+            
+    
+    def sort_start_time(self, model, row1, row2, data):
+        sort_column, _ = model.get_sort_column_id()
+        value1 = model.get_value(row1, sort_column)
+        value2 = model.get_value(row2, sort_column)
+        print('sort by start_time')
+        '''
+        if value1 < value2:
+            return -1
+        elif value1 == value2:
+            return 0
+        else:
+            return 1
+        '''
+        
+    def sort_duration(self, model, row1, row2, data):
+        sort_column, _ = model.get_sort_column_id()
+        value1 = model.get_value(row1, sort_column)
+        value2 = model.get_value(row2, sort_column)
+        value1 = int(value1.split(' ')[0])
+        value2 = int(value2.split(' ')[0])
+        if value1 < value2:
+            return -1
+        elif value1 == value2:
+            return 0
+        else:
+            return 1
+
     
     def generate_button(self, image, label, action, *args):
         try:
@@ -817,7 +929,7 @@ class Tool_Window(Gtk.Window):
         recordprocess.stop()
         radioRecord.streamDB[stream].update({
             'process' : '',
-            'status' : 'stopped'
+            'status' : 'refresh'
             })
     
 
@@ -830,32 +942,133 @@ class Tool_Window(Gtk.Window):
         else:
             self.dow_stack.set_visible_child_name('blank_stack')
     def onEdit(self, *args):
+        ## Refresh radio station combobox with latest entries (get from rhythmbox)
+        self.radio_combotext.remove_all()
+        entries = self.shell.get_source_by_entry_type(self.shell.props.db.entry_type_get_by_name("iradio")).props.base_query_model
+        for row in entries:
+            entry = row[0]
+            title = entry.get_string(RB.RhythmDBPropType.TITLE)
+            self.radio_combotext.append(title, title)
+        ## Set options: initialize when adding, set from selected entry when editing
         if "add" in args:
             print("Initializing options")
+            self.radio_combotext.set_active(0)
+            self.hour_time.set_value(8)
+            self.minute_time.set_value(0)
             self.ampm_combotext.set_active(0)
+            self.hour_duration.set_value(0)
+            self.minute_duration.set_value(30)
             self.repeat_checkbox.set_active(True)
+            for button in self.week_btns:
+                button.set_active(False)
             self.dow_stack.set_visible_child_name('btn_stack')
+            self.plan_manager.set_visible_child_name('plan-editor')
+            self.edit_entry = False
         else:
-            print('Setting known options')
-            # Set station
-            # Set hour start
-            # Set minute start
-            # Set am/pm
-            # Set hour duration
-            # Set minute duration
-            # Set repeat toggle
-            # Set day of week
-        self.plan_manager.set_visible_child_name('plan-editor')
+            ts = self.plan_treeview
+            (model, pathlist) = ts.get_selection().get_selected_rows()
+            for path in pathlist:
+                tree_iter = model.get_iter(path)
+                station = model.get_value(tree_iter, 0)
+                weekday = model.get_value(tree_iter, 1)
+                start_time = model.get_value(tree_iter, 2)
+                duration = model.get_value(tree_iter, 3)
+                print('Setting known options')
+                # Set station
+                self.radio_combotext.set_active_id(station)
+                # Set hour start
+                # Set minute start
+                # Set am/pm
+                # Set hour duration
+                duration = duration.split(' ')[0]
+                hour = int(int(duration) / 60)
+                print(str(hour))
+                self.hour_duration.set_value(hour)
+                # Set minute duration
+                minute = int(duration) - int(hour * 60)
+                print(str(minute))
+                self.minute_duration.set_value(minute)
+                # Set repeat toggle
+                if weekday != '-':
+                    self.repeat_checkbox.set_active(True)
+                    self.dow_stack.set_visible_child_name('btn_stack')
+                    # Set day of week
+                    days = ['U', 'M', 'T', 'W', 'R', 'F', 'S']
+                    for i, button in enumerate(self.week_btns):
+                        try:
+                            if days[i] in weekday:
+                                button.set_active(True)
+                        except:
+                            pass
+                else:
+                    self.repeat_checkbox.set_active(False)
+                    self.dow_stack.set_visible_child_name('blank_stack')
+                self.edit_entry = [model, tree_iter]
+                self.plan_manager.set_visible_child_name('plan-editor')
+        
     def onDelete(self, *args):
         print('deleting plan')
     def onCancel(self, *args):
         self.plan_manager.set_visible_child_name('plan-viewer')
     def onSave(self, *args):
         print('saving plan')
+        if self.hour_duration.get_value() or self.minute_duration.get_value():
+            station = self.radio_combotext.get_active_text()
+            print(station)
+            hour_time = self.hour_time.get_value()
+            minute_time = self.minute_time.get_value()
+            minute = int(minute_time)
+            if minute < 10:
+                minute = '0'+str(minute)
+            else:
+                minute = str(minute)
+            final_time = str(int(hour_time))+':'+minute+' '
+            ampm = self.ampm_combotext.get_active_text()
+            final_time += str(ampm)
+            print(final_time)
+            hour_duration = self.hour_duration.get_value()
+            minute_duration = self.minute_duration.get_value()
+            if hour_duration:
+                hour_duration = int(hour_duration)*60
+            duration = int(hour_duration) + int(minute_duration)
+            print(duration)
+            if self.repeat_checkbox.get_active():
+                week = ''
+                days = ['U', 'M', 'T', 'W', 'R', 'F', 'S']
+                for i, button in enumerate(self.week_btns):
+                    if button.get_active():
+                        week += days[i]
+                if not week:
+                    week = '-'
+            else:
+                week = '-'
+            print(week)
+            ## Save to liststore
+            info = [str(station), str(week), str(final_time), str(duration)+' min']
+            if self.edit_entry:
+                model = self.edit_entry[0]
+                tree_iter = self.edit_entry[1]
+                ## Update current listing
+                model.set_value(tree_iter, 0, station)
+                model.set_value(tree_iter, 1, week)
+                model.set_value(tree_iter, 2, final_time)
+                model.set_value(tree_iter, 3, str(duration)+' min')
+            else:
+                self.planner_liststore.append(info)
+            ## Save to planDB pickle/dictionary
+        else:
+            self.duration_error()
+            return False
         self.plan_manager.set_visible_child_name('plan-viewer')
+    
+    def duration_error(self):
+        dialog = Gtk.MessageDialog(None, 0, Gtk.MessageType.WARNING, Gtk.ButtonsType.CLOSE, 'Recording duration cannot be zero.')
+        if dialog.run() == Gtk.ResponseType.CLOSE:
+            dialog.destroy()
     """
     Main Container Button Functions
     """
     def onClose(self, *args):
         self.visible = None
         self.hide()
+        return True
