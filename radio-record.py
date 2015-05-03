@@ -779,7 +779,7 @@ class Tool_Window(Gtk.Window):
             while self.visible == True:
                 self.update_recordDB()
                 break
-            time.sleep(15)
+            time.sleep(10)
     def update_recordDB(self):
         listDB = {}
         streamDB = {}
