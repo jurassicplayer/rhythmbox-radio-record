@@ -569,13 +569,6 @@ class Tool_Window(Gtk.Window):
         self.set_border_width(5)
         self.shell = shell
             
-        """
-        Initialize pickled data 
-        """
-        try:
-            self.planDB = pickle.load(open('planned.pkl', 'rb'))
-        except:
-            self.planDB = {}
         
         """
         Main Container
@@ -768,6 +761,25 @@ class Tool_Window(Gtk.Window):
         close_btn = self.generate_button(Gtk.STOCK_CLOSE, "Close", "onClose")
         main_container.pack_end(close_btn, False, False, 0)
         
+        
+        """
+        Initialize pickled data 
+        """
+        print('loading pickled data')
+        try:
+            self.planDB = planDB = pickle.load(open(os.path.dirname(os.path.realpath(__file__))+'/planned.pkl', 'rb'))
+            print(planDB)
+            for uri in planDB:
+                for plan in planDB[uri]:
+                    print(plan)
+                    self.planner_liststore.append(plan)
+        except Exception as e:
+            print(e)
+            self.planDB = {}
+            
+        """
+        Begin refresh thread
+        """
         t = threading.Thread(target=self.refresh_info)
         t.start()
         
@@ -823,7 +835,6 @@ class Tool_Window(Gtk.Window):
         sort_column, _ = model.get_sort_column_id()
         value1 = model.get_value(row1, sort_column)
         value2 = model.get_value(row2, sort_column)
-        print('sort by weekday')
         if '-' in value1 and '-' not in value2:
             return -1
         elif '-' not in value1 and '-' in value2:
@@ -849,7 +860,6 @@ class Tool_Window(Gtk.Window):
                         end_value += 4
                     if value[i] == 'S':
                         end_value += 2
-                print(end_value)
                 values.append(end_value)
             if values[0] < values[1]:
                 return -1
@@ -863,15 +873,29 @@ class Tool_Window(Gtk.Window):
         sort_column, _ = model.get_sort_column_id()
         value1 = model.get_value(row1, sort_column)
         value2 = model.get_value(row2, sort_column)
-        print('sort by start_time')
-        '''
-        if value1 < value2:
+        values = []
+        for value in [value1, value2]:
+            value = value.replace(':', ' ').split(' ')
+            if value[0] == '12' and value[2] == 'am':
+                value[0] = 0
+            elif value[0] != '12' and value[2] == 'pm':
+                value[0] += 12
+            value = [ int(value[0]), int(value[1]), value[2]]
+            values.append(value)
+        # hours
+        if values[0][0] < values[1][0]:
             return -1
-        elif value1 == value2:
-            return 0
-        else:
+        elif values[0][0] > values[1][0]:
             return 1
-        '''
+        else:
+            # minutes
+            if values[0][1] < values[1][1]:
+                return -1
+            elif values[0][1] > values[1][1]:
+                return 1
+            else:
+                return 0
+
         
     def sort_duration(self, model, row1, row2, data):
         sort_column, _ = model.get_sort_column_id()
@@ -976,17 +1000,19 @@ class Tool_Window(Gtk.Window):
                 print('Setting known options')
                 # Set station
                 self.radio_combotext.set_active_id(station)
+                time = start_time.replace(':', ' ').split(' ')
                 # Set hour start
+                self.hour_time.set_value(int(time[0]))
                 # Set minute start
+                self.minute_time.set_value(int(time[1]))
                 # Set am/pm
+                self.ampm_combotext.set_active_id(time[2])
                 # Set hour duration
                 duration = duration.split(' ')[0]
                 hour = int(int(duration) / 60)
-                print(str(hour))
                 self.hour_duration.set_value(hour)
                 # Set minute duration
                 minute = int(duration) - int(hour * 60)
-                print(str(minute))
                 self.minute_duration.set_value(minute)
                 # Set repeat toggle
                 if weekday != '-':
@@ -1043,19 +1069,30 @@ class Tool_Window(Gtk.Window):
             else:
                 week = '-'
             print(week)
+            ## Check for conflicting times
             ## Save to liststore
             info = [str(station), str(week), str(final_time), str(duration)+' min']
             if self.edit_entry:
                 model = self.edit_entry[0]
                 tree_iter = self.edit_entry[1]
                 ## Update current listing
-                model.set_value(tree_iter, 0, station)
-                model.set_value(tree_iter, 1, week)
-                model.set_value(tree_iter, 2, final_time)
-                model.set_value(tree_iter, 3, str(duration)+' min')
+                for i in range(0,3):
+                    model.set_value(tree_iter, i, info[i])
             else:
                 self.planner_liststore.append(info)
+                
             ## Save to planDB pickle/dictionary
+            for uri in radioRecord.streamDB:
+                if info[0] == radioRecord.streamDB[uri]['title']:
+                    try:
+                        data = self.planDB[uri]
+                    except KeyError:
+                        data = []
+                    data.append(info)
+                    self.planDB.update({ uri : data})
+            print(self.planDB)
+            pickle.dump(self.planDB, open(os.path.dirname(os.path.realpath(__file__))+'/planned.pkl', 'wb'))
+            
         else:
             self.duration_error()
             return False
